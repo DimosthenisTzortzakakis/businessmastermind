@@ -85,6 +85,7 @@ let qeGridSelectedClients = [];
 let qeGridService = 'Video Editing';
 let qeGridStatus = 'Paid';
 let qeGridPayType = 'cash';
+let qeGridData = {}; // persistent grid state: key = "type|clientId|date|sub", value = string
 
 // Form state
 let incomePaymentType = 'invoice';
@@ -1067,7 +1068,46 @@ function hexToRgba(hex, alpha) {
   return 'rgba('+r+','+g+','+b+','+alpha+')';
 }
 
+function captureQEGridData() {
+  const table = document.getElementById('qeSpreadsheet');
+  if (!table) return;
+  table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
+    const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+    qeGridData[key] = inp.value;
+    if (inp.dataset.type === 'subnote') {
+      qeGridData['notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'')] =
+        (inp.style.display !== 'none' && inp.style.display !== '') ? '1' : '';
+    }
+  });
+}
+
+function restoreQEGridData() {
+  const table = document.getElementById('qeSpreadsheet');
+  if (!table) return;
+  table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
+    const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+    const val = qeGridData[key];
+    if (val !== undefined) inp.value = val;
+    if (inp.dataset.type === 'subnote') {
+      const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+      if (qeGridData[visKey]) {
+        inp.style.display = 'block';
+        const pen = inp.previousElementSibling;
+        if (pen?.classList.contains('qe-note-pen')) pen.style.display = 'none';
+      }
+    }
+  });
+  // Recalculate all totals
+  const seen = new Set();
+  table.querySelectorAll('[data-type="subqty"],[data-type="qty"]').forEach(inp => {
+    const k = inp.dataset.client+'|'+inp.dataset.date;
+    if (!seen.has(k) && (parseFloat(inp.value) > 0)) { seen.add(k); updateQEClientTotal(inp); }
+  });
+  updateQEColTotals();
+}
+
 function renderQEIncome(cont) {
+  captureQEGridData();
   if (!qeGridMonth) qeGridMonth = todayVal().slice(0,7);
   const [yr, mo] = qeGridMonth.split('-').map(Number);
   const daysInMonth = new Date(yr, mo, 0).getDate();
@@ -1131,9 +1171,9 @@ function renderQEIncome(cont) {
           return '<td class="qe-td-n" style="'+bl+'background:'+bg+';text-align:center;vertical-align:middle">'
             +'<div class="qe-sub-cell">'
             +'<input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subqty" oninput="updateQEClientTotal(this)" />'
-            +'<input class="qe-sp-inp qe-sp-subprice" type="number" placeholder="€?" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subprice" oninput="updateQEClientTotal(this)" />'
+            +'<input class="qe-sp-inp qe-sp-subprice" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subprice" oninput="updateQEClientTotal(this)" />'
             +'<button class="qe-note-pen" onclick="toggleSubNote(this)" title="Add note"><i class="fa-solid fa-pencil"></i></button>'
-            +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subnote" style="display:none" />'
+            +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subnote" style="display:none" onblur="qeSubNoteBlur(this)" />'
             +'</div></td>';
         }).join('');
         return subCells
@@ -1145,7 +1185,7 @@ function renderQEIncome(cont) {
           +'<div class="qe-sub-cell">'
           +'<input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+ds+'" data-type="qty" oninput="updateQEClientTotal(this)" />'
           +'<button class="qe-note-pen" onclick="toggleSubNote(this)" title="Add note"><i class="fa-solid fa-pencil"></i></button>'
-          +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+ds+'" data-type="subnote" style="display:none" />'
+          +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+ds+'" data-type="subnote" style="display:none" onblur="qeSubNoteBlur(this)" />'
           +'</div></td>'
           +'<td class="qe-td-n" style="background:'+bg+';text-align:center;vertical-align:middle"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
           +'<td class="qe-client-total" style="background:'+bg+'" data-client="'+c.id+'" data-date="'+ds+'" data-value="0">—</td>';
@@ -1211,6 +1251,7 @@ function renderQEIncome(cont) {
     </div>
     <button class="qe-save-grid-btn" onclick="saveQEGrid()"><i class="fa-solid fa-check"></i> Save All Filled Entries</button>
   `;
+  restoreQEGridData();
 }
 
 function updateQEClientTotal(inp) {
@@ -1273,10 +1314,17 @@ function qeSpreadsheetNav(e, inp) {
 function toggleSubNote(btn) {
   const inp = btn.nextElementSibling;
   if (!inp) return;
-  const hidden = inp.style.display === 'none' || inp.style.display === '';
-  inp.style.display = hidden ? 'block' : 'none';
-  btn.classList.toggle('active', hidden);
-  if (hidden) { inp.focus(); }
+  btn.style.display = 'none';
+  inp.style.display = 'block';
+  inp.focus();
+}
+
+function qeSubNoteBlur(inp) {
+  if (!inp.value.trim()) {
+    inp.style.display = 'none';
+    const pen = inp.previousElementSibling;
+    if (pen?.classList.contains('qe-note-pen')) pen.style.display = '';
+  }
 }
 
 function toggleSidebar() {
@@ -1292,7 +1340,7 @@ function toggleQEGridClient(id, checked) {
 function saveQEGrid() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
-  const newEntries = [];
+  let savedCount = 0; let savedTotal = 0;
   table.querySelectorAll('tbody tr').forEach(tr=>{
     const dateStr = tr.dataset.date;
     const done = new Set();
@@ -1313,10 +1361,17 @@ function saveQEGrid() {
           if (effectivePrice <= 0) return;
           const subNote = subNoteEl?.value.trim() || '';
           const amount = Math.round(qty * effectivePrice * 100) / 100;
-          const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount,
-            vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
-            paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
-          state.income.push(entry); newEntries.push(entry);
+          // Upsert: update existing entry or create new
+          const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||'') && e.service===service);
+          if (xi >= 0) {
+            state.income[xi] = { ...state.income[xi], amount, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
+          } else {
+            const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount,
+              vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
+              paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
+            state.income.push(entry); sheetsAdd('income',entry);
+          }
+          savedCount++; savedTotal += amount;
         });
       } else {
         const qty = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value) || 0;
@@ -1324,23 +1379,24 @@ function saveQEGrid() {
         const subNoteEl = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
         const subNote = subNoteEl?.value.trim() || '';
         const amount = Math.round(qty * price * 100) / 100;
-        const entry = { id:genId(), clientId:cid, subClient:'', service, amount,
-          vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
-          paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
-        state.income.push(entry); newEntries.push(entry);
+        if (amount <= 0) return;
+        const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')=== '' && e.service===service);
+        if (xi >= 0) {
+          state.income[xi] = { ...state.income[xi], amount, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
+        } else {
+          const entry = { id:genId(), clientId:cid, subClient:'', service, amount,
+            vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
+            paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
+          state.income.push(entry); sheetsAdd('income',entry);
+        }
+        savedCount++; savedTotal += amount;
       }
     });
   });
-  if (!newEntries.length) { showToast('No entries to save','error'); return; }
+  if (!savedCount) { showToast('No entries to save','error'); return; }
   saveData();
-  newEntries.forEach(e=>sheetsAdd('income',e));
-  const total = newEntries.reduce((s,e)=>s+e.amount,0);
-  showToast(newEntries.length+' entries saved — '+fmt(total));
-  table.querySelectorAll('[data-type="subqty"],[data-type="qty"],[data-type="price"],[data-type="subprice"],[data-type="subnote"]').forEach(inp=>{ inp.value=''; if(inp.dataset.type==='subnote') inp.style.display='none'; });
-  table.querySelectorAll('.qe-note-pen').forEach(btn=>btn.classList.remove('active'));
-  table.querySelectorAll('.qe-client-total').forEach(c=>{c.textContent='—';c.dataset.value='0';});
-  table.querySelectorAll('.qe-td-total').forEach(c=>c.textContent='—');
-  updateQEColTotals();
+  showToast(savedCount+' entries saved — '+fmt(savedTotal));
+  // Keep all values visible — do NOT clear the grid
 }
 
 function toggleQEDate(btn) {

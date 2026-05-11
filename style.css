@@ -2236,7 +2236,7 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   display: block;
 }
 .qe-sp-qty   { width: 48px; padding: 5px 4px; }
-.qe-sp-price { width: 60px; padding: 5px 4px; }
+.qe-sp-price { width: 60px; padding: 5px 4px; margin: 0 auto; display: block; }
 .qe-sp-subprice { width: 46px; padding: 2px 4px; margin-top: 2px; font-size: 10px; color: var(--amber); opacity: 0.7; }
 .qe-sp-subprice:focus { opacity: 1; }
 .qe-sp-subprice::placeholder { color: var(--amber); opacity: 0.6; font-size: 9px; }
@@ -2294,6 +2294,7 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   white-space: nowrap;
   padding: 6px 10px !important;
 }
+.qe-td-total, .qe-tf-grand { border-left: 1px solid rgba(255,255,255,0.1) !important; }
 .qe-sp-tfoot { background: var(--bg-sidebar); border-top: 2px solid var(--border); }
 .qe-tf-label {
   font-size: 10px;
