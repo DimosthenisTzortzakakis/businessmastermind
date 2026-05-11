@@ -2192,7 +2192,30 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   font-weight: 900;
 }
 .qe-today-row { background: rgba(99,102,241,0.04); }
-.qe-td-cell { padding: 3px; }
+.qe-td-cell { padding: 3px; display: flex; flex-direction: column; gap: 3px; }
+.qe-sp-sub {
+  width: 80px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 5px;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+.qe-sp-sub:focus { outline: none; border-color: var(--accent); }
+.qe-sp-note {
+  width: 80px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+}
+.qe-sp-note:focus { outline: none; border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.04); }
+.qe-sp-note::placeholder { color: rgba(255,255,255,0.2); }
 .qe-sp-cell {
   width: 80px;
   background: rgba(255,255,255,0.04);

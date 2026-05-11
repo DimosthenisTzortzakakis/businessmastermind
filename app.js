@@ -1062,20 +1062,182 @@ function renderQuickEntry() {
 }
 
 function renderQEIncome(cont) {
+  if (!qeGridMonth) qeGridMonth = todayVal().slice(0,7);
+  const [yr, mo] = qeGridMonth.split('-').map(Number);
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const today = todayVal();
+
+  if (!qeGridSelectedClients.length && state.clients.length)
+    qeGridSelectedClients = state.clients.slice(0, 6).map(c=>c.id);
+
+  const selCols = state.clients.filter(c=>qeGridSelectedClients.includes(c.id));
+  const moOpts = (()=>{
+    const ms = allMonths();
+    if (!ms.includes(qeGridMonth)) ms.unshift(qeGridMonth);
+    return ms.map(m=>`<option value="${m}" ${m===qeGridMonth?'selected':''}>${monthLabel(m)}</option>`).join('');
+  })();
+
+  const clientToggles = state.clients.map(c=>`
+    <label class="qe-client-toggle ${qeGridSelectedClients.includes(c.id)?'active':''}">
+      <input type="checkbox" style="display:none" ${qeGridSelectedClients.includes(c.id)?'checked':''}
+        onchange="toggleQEGridClient('${c.id}',this.checked)" />
+      <span class="qe-ct-dot" style="background:${c.color}"></span>
+      <span>${c.name}</span>
+    </label>`).join('');
+
   cont.innerHTML = `
-    <div class="qe-info"><i class="fa-solid fa-lightbulb"></i> Fill rows and press ✓ to save · Qty × Unit Price auto-fills Total · Tab between cells</div>
-    <div class="qe-table-wrapper">
-      <table class="qe-table">
+    <div class="qe-grid-controls">
+      <div class="qe-ctrl-row">
+        <div class="qe-ctrl-field">
+          <label class="qe-ctrl-label">Month</label>
+          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridMonth=this.value;renderQEIncome(document.getElementById('qeContent'))">${moOpts}</select>
+        </div>
+        <div class="qe-ctrl-field" style="flex:2">
+          <label class="qe-ctrl-label">Service</label>
+          <input type="text" class="form-input" style="padding:7px 10px;font-size:13px" value="${qeGridService}" list="servicesList" placeholder="e.g. Video Editing" oninput="qeGridService=this.value" />
+        </div>
+        <div class="qe-ctrl-field">
+          <label class="qe-ctrl-label">Type</label>
+          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridPayType=this.value">
+            <option value="cash" ${qeGridPayType==='cash'?'selected':''}>Cash</option>
+            <option value="invoice" ${qeGridPayType==='invoice'?'selected':''}>Invoice</option>
+          </select>
+        </div>
+        <div class="qe-ctrl-field">
+          <label class="qe-ctrl-label">Status</label>
+          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridStatus=this.value">
+            <option value="Paid" ${qeGridStatus==='Paid'?'selected':''}>Paid</option>
+            <option value="Pending" ${qeGridStatus==='Pending'?'selected':''}>Pending</option>
+          </select>
+        </div>
+      </div>
+      <div class="qe-client-row">
+        <span class="qe-ctrl-label" style="flex-shrink:0">Clients:</span>
+        <div class="qe-toggles-wrap">${clientToggles}</div>
+      </div>
+    </div>
+    <div class="qe-sp-hint"><i class="fa-solid fa-lightbulb"></i> Amount or <strong>QxP</strong> (e.g. <code>2x20</code> = €40) · Enter = move down · Each cell: amount / subclient / note</div>
+    <div class="qe-spreadsheet-wrapper">
+      <table class="qe-spreadsheet" id="qeSpreadsheet">
         <thead><tr>
-          <th>Date</th><th>Client</th><th>Subclient</th><th>Service</th>
-          <th>Qty</th><th>Unit Price (€)</th><th>Total (€)</th><th>Note</th><th>Payment</th><th>Status</th><th></th>
+          <th class="qe-th-day">Day</th>
+          ${selCols.map(c=>`<th class="qe-th-client" style="border-top:3px solid ${c.color}">${c.name}</th>`).join('')}
+          <th class="qe-th-total">Day Total</th>
         </tr></thead>
-        <tbody id="qeIncomeBody"></tbody>
+        <tbody>
+          ${Array.from({length:daysInMonth},(_,i)=>{
+            const day = i+1;
+            const dateStr = qeGridMonth+'-'+String(day).padStart(2,'0');
+            const isToday = dateStr===today;
+            const cells = selCols.map(c=>{
+              const subOpts = (c.subclients||[]).map(s=>'<option value="'+s+'">'+s+'</option>').join('');
+              const subSel = subOpts ? '<select class="qe-sp-sub"><option value="">subclient…</option>'+subOpts+'</select>' : '';
+              return '<td class="qe-td-cell">'
+                +'<input class="qe-sp-cell" type="text" placeholder="" data-client="'+c.id+'" data-date="'+dateStr+'" oninput="updateQERowTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" />'
+                +subSel
+                +'<input class="qe-sp-note" type="text" placeholder="note…" />'
+                +'</td>';
+            }).join('');
+            return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+dateStr+'">'
+              +'<td class="qe-td-day'+(isToday?' qe-today-day':'')+'">'+day+'</td>'
+              +cells
+              +'<td class="qe-td-total" data-date="'+dateStr+'">—</td></tr>';
+          }).join('')}
+        </tbody>
+        <tfoot><tr class="qe-sp-tfoot">
+          <td class="qe-tf-label">TOTAL</td>
+          ${selCols.map(c=>'<td class="qe-tf-coltotal" data-client="'+c.id+'">—</td>').join('')}
+          <td class="qe-tf-grand">—</td>
+        </tr></tfoot>
       </table>
     </div>
-    <button class="qe-add-row-btn" onclick="addQEIncomeRow()"><i class="fa-solid fa-plus"></i> Add Row</button>
+    <button class="qe-save-grid-btn" onclick="saveQEGrid()"><i class="fa-solid fa-check"></i> Save All Filled Entries</button>
   `;
-  for (let i = 0; i < 3; i++) addQEIncomeRow();
+}
+
+function parseQECell(val) {
+  val = (val||'').trim();
+  if (!val) return 0;
+  const m = val.match(/^(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)$/i);
+  if (m) return Math.round(parseFloat(m[1]) * parseFloat(m[2]) * 100) / 100;
+  return parseFloat(val) || 0;
+}
+
+function updateQERowTotal(inp) {
+  const row = inp.closest('tr');
+  let rowTotal = 0;
+  row.querySelectorAll('.qe-sp-cell').forEach(c=>{ rowTotal+=parseQECell(c.value); });
+  const tc = row.querySelector('.qe-td-total');
+  if (tc) tc.textContent = rowTotal>0 ? fmt(rowTotal) : '—';
+  updateQEColTotals();
+}
+
+function updateQEColTotals() {
+  const table = document.getElementById('qeSpreadsheet');
+  if (!table) return;
+  const colTotals = {};
+  table.querySelectorAll('.qe-sp-cell').forEach(inp=>{
+    const cid = inp.dataset.client;
+    colTotals[cid] = (colTotals[cid]||0) + parseQECell(inp.value);
+  });
+  let grand = 0;
+  table.querySelectorAll('.qe-tf-coltotal').forEach(cell=>{
+    const v = colTotals[cell.dataset.client]||0;
+    cell.textContent = v>0 ? fmt(v) : '—';
+    grand += v;
+  });
+  const g = table.querySelector('.qe-tf-grand');
+  if (g) g.textContent = grand>0 ? fmt(grand) : '—';
+}
+
+function qeSpreadsheetNav(e, inp) {
+  if (e.key==='Enter') {
+    e.preventDefault();
+    const tr = inp.closest('tr');
+    const inputs = Array.from(tr.closest('tbody').querySelectorAll('.qe-sp-cell'));
+    const idx = inputs.indexOf(inp);
+    const colCount = tr.querySelectorAll('.qe-sp-cell').length;
+    const next = inputs[idx + colCount];
+    if (next) { next.focus(); next.select(); }
+  }
+}
+
+function toggleQEGridClient(id, checked) {
+  if (checked) { if (!qeGridSelectedClients.includes(id)) qeGridSelectedClients.push(id); }
+  else { qeGridSelectedClients = qeGridSelectedClients.filter(c=>c!==id); }
+  renderQEIncome(document.getElementById('qeContent'));
+}
+
+function saveQEGrid() {
+  const table = document.getElementById('qeSpreadsheet');
+  if (!table) return;
+  const newEntries = [];
+  table.querySelectorAll('.qe-sp-cell').forEach(inp=>{
+    const val = parseQECell(inp.value);
+    if (val<=0) return;
+    const td = inp.closest('td');
+    const subClient = td.querySelector('.qe-sp-sub')?.value || '';
+    const notes = td.querySelector('.qe-sp-note')?.value.trim() || '';
+    const cid = inp.dataset.client;
+    const date = inp.dataset.date;
+    const service = (qeGridService||'Video Editing').trim();
+    const entry = { id:genId(), clientId:cid, subClient, service,
+      amount:val, vatAmount:qeGridPayType==='invoice'?val*VAT_RATE:0,
+      paymentType:qeGridPayType, date, status:qeGridStatus,
+      notes, createdAt:Date.now() };
+    state.income.push(entry);
+    newEntries.push(entry);
+  });
+  if (!newEntries.length) { showToast('No entries to save','error'); return; }
+  saveData();
+  newEntries.forEach(e=>sheetsAdd('income',e));
+  const total = newEntries.reduce((s,e)=>s+e.amount,0);
+  showToast(newEntries.length+' entries saved — '+fmt(total));
+  table.querySelectorAll('.qe-sp-cell').forEach(inp=>inp.value='');
+  table.querySelectorAll('.qe-sp-note').forEach(inp=>inp.value='');
+  table.querySelectorAll('.qe-sp-sub').forEach(sel=>sel.selectedIndex=0);
+  table.querySelectorAll('.qe-td-total').forEach(c=>c.textContent='—');
+  updateQEColTotals();
 }
 
 function toggleQEDate(btn) {
@@ -1092,98 +1254,6 @@ function toggleQEDate(btn) {
     btn.textContent = 'M';
     btn.classList.remove('month-mode');
   }
-}
-
-function addQEIncomeRow() {
-  const tbody = document.getElementById('qeIncomeBody');
-  if (!tbody) return;
-  const rowId = 'qeir-' + genId();
-  const clientOpts = state.clients.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  const tr = document.createElement('tr');
-  tr.id = rowId; tr.className = 'qe-row';
-  tr.innerHTML = `
-    <td><input class="qe-cell qe-input qe-date" type="date" value="${todayVal()}" /></td>
-    <td><select class="qe-cell qe-select" onchange="onQEClientChange(this,'${rowId}')">
-      <option value="">— Client —</option>${clientOpts}
-    </select></td>
-    <td><select class="qe-cell qe-select qe-sub-${rowId}" disabled>
-      <option value="">None</option>
-    </select></td>
-    <td><input class="qe-cell qe-input" type="text" list="servicesList" placeholder="Service…" /></td>
-    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="—" min="1" step="1" data-r="qty" oninput="recalcQEIncomeRow(this)" /></td>
-    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="—" step="0.01" min="0" data-r="up" oninput="recalcQEIncomeRow(this)" /></td>
-    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="0.00" step="0.01" min="0" data-r="total" /></td>
-    <td><input class="qe-cell qe-input" type="text" placeholder="Note…" data-r="note" /></td>
-    <td><select class="qe-cell qe-select" data-r="pay">
-      <option value="cash">Cash</option>
-      <option value="invoice">Invoice</option>
-    </select></td>
-    <td><select class="qe-cell qe-select" data-r="status">
-      <option value="Paid">Paid</option>
-      <option value="Pending">Pending</option>
-      <option value="Overdue">Overdue</option>
-    </select></td>
-    <td class="qe-actions">
-      <button class="qe-save-btn" onclick="saveQEIncomeRow('${rowId}')" title="Save"><i class="fa-solid fa-check"></i></button>
-      <button class="qe-del-btn" onclick="document.getElementById('${rowId}').remove()" title="Remove"><i class="fa-solid fa-times"></i></button>
-    </td>`;
-  tbody.appendChild(tr);
-  tr.querySelector('[data-r="note"]').addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); saveQEIncomeRow(rowId); }
-  });
-}
-
-function recalcQEIncomeRow(inp) {
-  const tr = inp.closest('tr');
-  const qty = parseFloat(tr.querySelector('[data-r="qty"]')?.value) || 0;
-  const up  = parseFloat(tr.querySelector('[data-r="up"]')?.value)  || 0;
-  if (qty > 0 && up > 0) {
-    const totalEl = tr.querySelector('[data-r="total"]');
-    if (totalEl) totalEl.value = (qty * up).toFixed(2);
-  }
-}
-
-function onQEClientChange(sel, rowId) {
-  const c = clientById(sel.value);
-  const subSel = document.querySelector(`.qe-sub-${rowId}`);
-  if (!subSel) return;
-  const subs = c?.subclients || [];
-  subSel.innerHTML = '<option value="">None</option>' + subs.map(s => `<option value="${s}">${s}</option>`).join('');
-  subSel.disabled = subs.length === 0;
-}
-
-function saveQEIncomeRow(rowId) {
-  const tr = document.getElementById(rowId);
-  if (!tr) return;
-  const sels      = tr.querySelectorAll('select');
-  const dateEl    = tr.querySelector('.qe-date');
-  const serviceEl = tr.querySelector('input[list="servicesList"]');
-  const clientId  = sels[0].value;
-  const subClient = sels[1].value;
-  const service   = serviceEl?.value.trim() || 'Video Editing';
-  const qty       = parseFloat(tr.querySelector('[data-r="qty"]')?.value)   || 0;
-  const up        = parseFloat(tr.querySelector('[data-r="up"]')?.value)    || 0;
-  const totalVal  = parseFloat(tr.querySelector('[data-r="total"]')?.value) || 0;
-  const note      = tr.querySelector('[data-r="note"]')?.value.trim()       || '';
-  const payType   = tr.querySelector('[data-r="pay"]')?.value               || 'cash';
-  const status    = tr.querySelector('[data-r="status"]')?.value            || 'Paid';
-  const rawDate   = dateEl?.value || '';
-  const date      = rawDate.length === 7 ? rawDate + '-01' : rawDate;
-  const amount    = totalVal > 0 ? totalVal : (qty > 0 && up > 0 ? qty * up : 0);
-
-  if (!clientId)         { flashRow(tr,'error'); showToast('Select a client','error'); return; }
-  if (!amount||amount<=0){ flashRow(tr,'error'); showToast('Enter an amount','error'); return; }
-  if (!rawDate)          { flashRow(tr,'error'); showToast('Select a date','error'); return; }
-
-  const entry = { id:genId(), clientId, subClient, service, amount,
-    vatAmount: payType==='invoice' ? amount*VAT_RATE : 0,
-    paymentType:payType, date, status, notes:note, createdAt:Date.now() };
-  state.income.push(entry);
-  saveData();
-  sheetsAdd('income', entry);
-  flashRow(tr,'success');
-  setTimeout(() => tr.remove(), 500);
-  showToast(`Saved — ${fmt(amount)}`);
 }
 
 function renderQEExpense(cont) {
