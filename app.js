@@ -1125,27 +1125,34 @@ function renderQEIncome(cont) {
       const subs = c.subclients||[];
       const bg = hexToRgba(c.color, 0.05);
       if (subs.length > 0) {
-        // Agency: one column per subclient (qty stacked above per-sub price override) + shared price + total
+        // Agency: one column per subclient (qty + subprice + pencil note) + shared price + total
         const subCells = subs.map((s,si)=>{
           const bl = si===0 ? 'border-left:2px solid '+c.color+';' : '';
-          return '<td class="qe-td-n" style="'+bl+'background:'+bg+'">'
+          return '<td class="qe-td-n" style="'+bl+'background:'+bg+';text-align:center;vertical-align:middle">'
+            +'<div class="qe-sub-cell">'
             +'<input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subqty" oninput="updateQEClientTotal(this)" />'
             +'<input class="qe-sp-inp qe-sp-subprice" type="number" placeholder="€?" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subprice" oninput="updateQEClientTotal(this)" />'
-            +'</td>';
+            +'<button class="qe-note-pen" onclick="toggleSubNote(this)" title="Add note"><i class="fa-solid fa-pencil"></i></button>'
+            +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subnote" style="display:none" />'
+            +'</div></td>';
         }).join('');
         return subCells
-          +'<td class="qe-td-n" style="background:'+bg+'"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
+          +'<td class="qe-td-n" style="background:'+bg+';text-align:center;vertical-align:middle"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
           +'<td class="qe-client-total" style="background:'+bg+'" data-client="'+c.id+'" data-date="'+ds+'" data-value="0">—</td>';
       } else {
-        // Direct: qty + price + total
-        return '<td class="qe-td-n" style="border-left:2px solid '+c.color+';background:'+bg+'"><input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+ds+'" data-type="qty" oninput="updateQEClientTotal(this)" /></td>'
-          +'<td class="qe-td-n" style="background:'+bg+'"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
+        // Direct: qty (with note) + price + total
+        return '<td class="qe-td-n" style="border-left:2px solid '+c.color+';background:'+bg+';text-align:center;vertical-align:middle">'
+          +'<div class="qe-sub-cell">'
+          +'<input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+ds+'" data-type="qty" oninput="updateQEClientTotal(this)" />'
+          +'<button class="qe-note-pen" onclick="toggleSubNote(this)" title="Add note"><i class="fa-solid fa-pencil"></i></button>'
+          +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+ds+'" data-type="subnote" style="display:none" />'
+          +'</div></td>'
+          +'<td class="qe-td-n" style="background:'+bg+';text-align:center;vertical-align:middle"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
           +'<td class="qe-client-total" style="background:'+bg+'" data-client="'+c.id+'" data-date="'+ds+'" data-value="0">—</td>';
       }
     }).join('');
     return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+ds+'">'
       +'<td class="qe-td-day'+(isToday?' qe-today-day':'')+'">'+day+'</td>'
-      +'<td class="qe-td-note-cell"><input class="qe-sp-inp qe-sp-note-inp" type="text" placeholder="note…" data-date="'+ds+'" data-type="note" /></td>'
       +clientCells
       +'<td class="qe-td-total" data-date="'+ds+'">—</td></tr>';
   }).join('');
@@ -1189,7 +1196,6 @@ function renderQEIncome(cont) {
         <thead>
           <tr>
             <th class="qe-th-day" rowspan="2">Day</th>
-            <th class="qe-sh" rowspan="2" style="min-width:90px">Note</th>
             ${hRow1}
             <th class="qe-th-total" rowspan="2">Day Total</th>
           </tr>
@@ -1198,7 +1204,6 @@ function renderQEIncome(cont) {
         <tbody>${bodyRows}</tbody>
         <tfoot><tr class="qe-sp-tfoot">
           <td class="qe-tf-label">TOTAL</td>
-          <td></td>
           ${footCells}
           <td class="qe-tf-grand">—</td>
         </tr></tfoot>
@@ -1265,6 +1270,19 @@ function qeSpreadsheetNav(e, inp) {
   }
 }
 
+function toggleSubNote(btn) {
+  const inp = btn.nextElementSibling;
+  if (!inp) return;
+  const hidden = inp.style.display === 'none' || inp.style.display === '';
+  inp.style.display = hidden ? 'block' : 'none';
+  btn.classList.toggle('active', hidden);
+  if (hidden) { inp.focus(); }
+}
+
+function toggleSidebar() {
+  document.body.classList.toggle('sidebar-hidden');
+}
+
 function toggleQEGridClient(id, checked) {
   if (checked) { if (!qeGridSelectedClients.includes(id)) qeGridSelectedClients.push(id); }
   else { qeGridSelectedClients = qeGridSelectedClients.filter(c=>c!==id); }
@@ -1277,13 +1295,11 @@ function saveQEGrid() {
   const newEntries = [];
   table.querySelectorAll('tbody tr').forEach(tr=>{
     const dateStr = tr.dataset.date;
-    const note = tr.querySelector('[data-type="note"]')?.value.trim() || '';
     const done = new Set();
     tr.querySelectorAll('[data-type="price"]').forEach(priceInp=>{
       const cid = priceInp.dataset.client;
       if (done.has(cid)) return; done.add(cid);
       const price = parseFloat(priceInp.value) || 0;
-      if (price <= 0) return;
       const service = (qeGridService||'Video Editing').trim();
       const subqtys = tr.querySelectorAll('[data-client="'+cid+'"][data-type="subqty"]');
       if (subqtys.length > 0) {
@@ -1292,21 +1308,25 @@ function saveQEGrid() {
           if (qty <= 0) return;
           const sub = sq.dataset.sub;
           const subPriceEl = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subprice"]');
+          const subNoteEl  = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subnote"]');
           const effectivePrice = parseFloat(subPriceEl?.value) || price;
           if (effectivePrice <= 0) return;
+          const subNote = subNoteEl?.value.trim() || '';
           const amount = Math.round(qty * effectivePrice * 100) / 100;
           const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount,
             vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
-            paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:note, createdAt:Date.now() };
+            paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
           state.income.push(entry); newEntries.push(entry);
         });
       } else {
         const qty = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value) || 0;
         if (qty <= 0) return;
+        const subNoteEl = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
+        const subNote = subNoteEl?.value.trim() || '';
         const amount = Math.round(qty * price * 100) / 100;
         const entry = { id:genId(), clientId:cid, subClient:'', service, amount,
           vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
-          paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:note, createdAt:Date.now() };
+          paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
         state.income.push(entry); newEntries.push(entry);
       }
     });
@@ -1316,7 +1336,8 @@ function saveQEGrid() {
   newEntries.forEach(e=>sheetsAdd('income',e));
   const total = newEntries.reduce((s,e)=>s+e.amount,0);
   showToast(newEntries.length+' entries saved — '+fmt(total));
-  table.querySelectorAll('[data-type="subqty"],[data-type="qty"],[data-type="price"],[data-type="subprice"],[data-type="note"]').forEach(inp=>inp.value='');
+  table.querySelectorAll('[data-type="subqty"],[data-type="qty"],[data-type="price"],[data-type="subprice"],[data-type="subnote"]').forEach(inp=>{ inp.value=''; if(inp.dataset.type==='subnote') inp.style.display='none'; });
+  table.querySelectorAll('.qe-note-pen').forEach(btn=>btn.classList.remove('active'));
   table.querySelectorAll('.qe-client-total').forEach(c=>{c.textContent='—';c.dataset.value='0';});
   table.querySelectorAll('.qe-td-total').forEach(c=>c.textContent='—');
   updateQEColTotals();
