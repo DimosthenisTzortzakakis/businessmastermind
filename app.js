@@ -1062,173 +1062,20 @@ function renderQuickEntry() {
 }
 
 function renderQEIncome(cont) {
-  if (!qeGridMonth) qeGridMonth = todayVal().slice(0,7);
-  const [yr, mo] = qeGridMonth.split('-').map(Number);
-  const daysInMonth = new Date(yr, mo, 0).getDate();
-  const today = todayVal();
-
-  if (!qeGridSelectedClients.length && state.clients.length)
-    qeGridSelectedClients = state.clients.slice(0, 6).map(c=>c.id);
-
-  const selCols = state.clients.filter(c=>qeGridSelectedClients.includes(c.id));
-  const moOpts = (() => {
-    const ms = allMonths();
-    if (!ms.includes(qeGridMonth)) ms.unshift(qeGridMonth);
-    return ms.map(m=>`<option value="${m}" ${m===qeGridMonth?'selected':''}>${monthLabel(m)}</option>`).join('');
-  })();
-
-  const clientToggles = state.clients.map(c=>`
-    <label class="qe-client-toggle ${qeGridSelectedClients.includes(c.id)?'active':''}">
-      <input type="checkbox" style="display:none" ${qeGridSelectedClients.includes(c.id)?'checked':''}
-        onchange="toggleQEGridClient('${c.id}',this.checked)" />
-      <span class="qe-ct-dot" style="background:${c.color}"></span>
-      <span>${c.name}</span>
-    </label>`).join('');
-
   cont.innerHTML = `
-    <div class="qe-grid-controls">
-      <div class="qe-ctrl-row">
-        <div class="qe-ctrl-field">
-          <label class="qe-ctrl-label">Month</label>
-          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridMonth=this.value;renderQEIncome(document.getElementById('qeContent'))">${moOpts}</select>
-        </div>
-        <div class="qe-ctrl-field" style="flex:2">
-          <label class="qe-ctrl-label">Service</label>
-          <input type="text" class="form-input" style="padding:7px 10px;font-size:13px" value="${qeGridService}" list="servicesList" placeholder="e.g. Video Editing" oninput="qeGridService=this.value" />
-        </div>
-        <div class="qe-ctrl-field">
-          <label class="qe-ctrl-label">Type</label>
-          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridPayType=this.value">
-            <option value="cash" ${qeGridPayType==='cash'?'selected':''}>Cash</option>
-            <option value="invoice" ${qeGridPayType==='invoice'?'selected':''}>Invoice</option>
-          </select>
-        </div>
-        <div class="qe-ctrl-field">
-          <label class="qe-ctrl-label">Status</label>
-          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridStatus=this.value">
-            <option value="Paid" ${qeGridStatus==='Paid'?'selected':''}>Paid</option>
-            <option value="Pending" ${qeGridStatus==='Pending'?'selected':''}>Pending</option>
-          </select>
-        </div>
-      </div>
-      <div class="qe-client-row">
-        <span class="qe-ctrl-label" style="flex-shrink:0">Clients:</span>
-        <div class="qe-toggles-wrap">${clientToggles}</div>
-      </div>
-    </div>
-    <div class="qe-sp-hint"><i class="fa-solid fa-lightbulb"></i> Type amounts or <strong>QxP</strong> (e.g. <code>2x20</code> = €40) · Enter = move down · Tab = move right</div>
-    <div class="qe-spreadsheet-wrapper">
-      <table class="qe-spreadsheet" id="qeSpreadsheet">
+    <div class="qe-info"><i class="fa-solid fa-lightbulb"></i> Fill rows and press ✓ to save · Qty × Unit Price auto-fills Total · Tab between cells</div>
+    <div class="qe-table-wrapper">
+      <table class="qe-table">
         <thead><tr>
-          <th class="qe-th-day">Day</th>
-          ${selCols.map(c=>`<th class="qe-th-client" style="border-top:3px solid ${c.color}">${c.name}</th>`).join('')}
-          <th class="qe-th-total">Day Total</th>
+          <th>Date</th><th>Client</th><th>Subclient</th><th>Service</th>
+          <th>Qty</th><th>Unit Price (€)</th><th>Total (€)</th><th>Note</th><th>Payment</th><th>Status</th><th></th>
         </tr></thead>
-        <tbody>
-          ${Array.from({length:daysInMonth},(_,i)=>{
-            const day = i+1;
-            const dateStr = `${qeGridMonth}-${String(day).padStart(2,'0')}`;
-            const isToday = dateStr===today;
-            return `<tr class="qe-sp-row${isToday?' qe-today-row':''}" data-date="${dateStr}">
-              <td class="qe-td-day${isToday?' qe-today-day':''}">${day}</td>
-              ${selCols.map(c=>`<td class="qe-td-cell"><input class="qe-sp-cell" type="text" placeholder=""
-                data-client="${c.id}" data-date="${dateStr}"
-                oninput="updateQERowTotal(this)"
-                onkeydown="qeSpreadsheetNav(event,this)" /></td>`).join('')}
-              <td class="qe-td-total" data-date="${dateStr}">—</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-        <tfoot><tr class="qe-sp-tfoot">
-          <td class="qe-tf-label">TOTAL</td>
-          ${selCols.map(c=>`<td class="qe-tf-coltotal" data-client="${c.id}">—</td>`).join('')}
-          <td class="qe-tf-grand">—</td>
-        </tr></tfoot>
+        <tbody id="qeIncomeBody"></tbody>
       </table>
     </div>
-    <button class="qe-save-grid-btn" onclick="saveQEGrid()"><i class="fa-solid fa-check"></i> Save All Filled Entries</button>
+    <button class="qe-add-row-btn" onclick="addQEIncomeRow()"><i class="fa-solid fa-plus"></i> Add Row</button>
   `;
-}
-
-function parseQECell(val) {
-  val = (val||'').trim();
-  if (!val) return 0;
-  const m = val.match(/^(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)$/i);
-  if (m) return Math.round(parseFloat(m[1]) * parseFloat(m[2]) * 100) / 100;
-  return parseFloat(val) || 0;
-}
-
-function updateQERowTotal(inp) {
-  const row = inp.closest('tr');
-  let rowTotal = 0;
-  row.querySelectorAll('.qe-sp-cell').forEach(c=>{ rowTotal+=parseQECell(c.value); });
-  const tc = row.querySelector('.qe-td-total');
-  if (tc) tc.textContent = rowTotal>0 ? fmt(rowTotal) : '—';
-  updateQEColTotals();
-}
-
-function updateQEColTotals() {
-  const table = document.getElementById('qeSpreadsheet');
-  if (!table) return;
-  const colTotals = {};
-  table.querySelectorAll('.qe-sp-cell').forEach(inp=>{
-    const cid = inp.dataset.client;
-    colTotals[cid] = (colTotals[cid]||0) + parseQECell(inp.value);
-  });
-  let grand = 0;
-  table.querySelectorAll('.qe-tf-coltotal').forEach(cell=>{
-    const v = colTotals[cell.dataset.client]||0;
-    cell.textContent = v>0 ? fmt(v) : '—';
-    grand += v;
-  });
-  const g = table.querySelector('.qe-tf-grand');
-  if (g) g.textContent = grand>0 ? fmt(grand) : '—';
-}
-
-function qeSpreadsheetNav(e, inp) {
-  if (e.key==='Enter') {
-    e.preventDefault();
-    const tr = inp.closest('tr');
-    const inputs = Array.from(tr.closest('tbody').querySelectorAll('.qe-sp-cell'));
-    const idx = inputs.indexOf(inp);
-    const colCount = tr.querySelectorAll('.qe-sp-cell').length;
-    const next = inputs[idx + colCount];
-    if (next) { next.focus(); next.select(); }
-  }
-}
-
-function toggleQEGridClient(id, checked) {
-  if (checked) { if (!qeGridSelectedClients.includes(id)) qeGridSelectedClients.push(id); }
-  else { qeGridSelectedClients = qeGridSelectedClients.filter(c=>c!==id); }
-  renderQEIncome(document.getElementById('qeContent'));
-}
-
-function saveQEGrid() {
-  const table = document.getElementById('qeSpreadsheet');
-  if (!table) return;
-  const cells = table.querySelectorAll('.qe-sp-cell');
-  const newEntries = [];
-  cells.forEach(inp=>{
-    const val = parseQECell(inp.value);
-    if (val<=0) return;
-    const cid = inp.dataset.client;
-    const date = inp.dataset.date;
-    const service = (qeGridService||'Video Editing').trim();
-    const entry = { id:genId(), clientId:cid, subClient:'', service,
-      amount:val, vatAmount:qeGridPayType==='invoice'?val*VAT_RATE:0,
-      paymentType:qeGridPayType, date, status:qeGridStatus,
-      notes:'', createdAt:Date.now() };
-    state.income.push(entry);
-    newEntries.push(entry);
-  });
-  if (!newEntries.length) { showToast('No entries to save','error'); return; }
-  saveData();
-  newEntries.forEach(e=>sheetsAdd('income',e));
-  const total = newEntries.reduce((s,e)=>s+e.amount,0);
-  showToast(`${newEntries.length} entries saved — ${fmt(total)}`);
-  table.querySelectorAll('.qe-sp-cell').forEach(inp=>inp.value='');
-  table.querySelectorAll('.qe-td-total').forEach(c=>c.textContent='—');
-  updateQEColTotals();
+  for (let i = 0; i < 3; i++) addQEIncomeRow();
 }
 
 function toggleQEDate(btn) {
@@ -1250,134 +1097,163 @@ function toggleQEDate(btn) {
 function addQEIncomeRow() {
   const tbody = document.getElementById('qeIncomeBody');
   if (!tbody) return;
-  const rowId   = 'qer-'+genId();
-  const clientOpts = state.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  const rowId = 'qeir-' + genId();
+  const clientOpts = state.clients.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
   const tr = document.createElement('tr');
   tr.id = rowId; tr.className = 'qe-row';
   tr.innerHTML = `
+    <td><input class="qe-cell qe-input qe-date" type="date" value="${todayVal()}" /></td>
     <td><select class="qe-cell qe-select" onchange="onQEClientChange(this,'${rowId}')">
-      <option value="">— Client —</option>${clientOpts}</select></td>
-    <td><select class="qe-cell qe-select qe-sub-${rowId}"><option value="">None</option></select></td>
+      <option value="">— Client —</option>${clientOpts}
+    </select></td>
+    <td><select class="qe-cell qe-select qe-sub-${rowId}" disabled>
+      <option value="">None</option>
+    </select></td>
     <td><input class="qe-cell qe-input" type="text" list="servicesList" placeholder="Service…" /></td>
-    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="0.00" step="0.01" min="0" /></td>
-    <td><select class="qe-cell qe-select"><option value="invoice">Invoice</option><option value="cash">Cash</option></select></td>
-    <td><div class="qe-date-wrap"><input class="qe-cell qe-input qe-date" type="date" value="${todayVal()}" /><button class="qe-date-toggle" title="Toggle month/date" onclick="toggleQEDate(this)">M</button></div></td>
-    <td><select class="qe-cell qe-select"><option value="Paid">Paid</option><option value="Pending">Pending</option><option value="Overdue">Overdue</option></select></td>
+    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="—" min="1" step="1" data-r="qty" oninput="recalcQEIncomeRow(this)" /></td>
+    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="—" step="0.01" min="0" data-r="up" oninput="recalcQEIncomeRow(this)" /></td>
+    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="0.00" step="0.01" min="0" data-r="total" /></td>
+    <td><input class="qe-cell qe-input" type="text" placeholder="Note…" data-r="note" /></td>
+    <td><select class="qe-cell qe-select" data-r="pay">
+      <option value="cash">Cash</option>
+      <option value="invoice">Invoice</option>
+    </select></td>
+    <td><select class="qe-cell qe-select" data-r="status">
+      <option value="Paid">Paid</option>
+      <option value="Pending">Pending</option>
+      <option value="Overdue">Overdue</option>
+    </select></td>
     <td class="qe-actions">
       <button class="qe-save-btn" onclick="saveQEIncomeRow('${rowId}')" title="Save"><i class="fa-solid fa-check"></i></button>
-      <button class="qe-del-btn"  onclick="document.getElementById('${rowId}').remove()" title="Remove"><i class="fa-solid fa-times"></i></button>
+      <button class="qe-del-btn" onclick="document.getElementById('${rowId}').remove()" title="Remove"><i class="fa-solid fa-times"></i></button>
     </td>`;
   tbody.appendChild(tr);
-  // Enter on last input saves
-  const inputs = tr.querySelectorAll('.qe-input,.qe-select');
-  inputs[inputs.length-1].addEventListener('keydown', e=>{ if(e.key==='Enter'){e.preventDefault();saveQEIncomeRow(rowId);} });
+  tr.querySelector('[data-r="note"]').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); saveQEIncomeRow(rowId); }
+  });
+}
+
+function recalcQEIncomeRow(inp) {
+  const tr = inp.closest('tr');
+  const qty = parseFloat(tr.querySelector('[data-r="qty"]')?.value) || 0;
+  const up  = parseFloat(tr.querySelector('[data-r="up"]')?.value)  || 0;
+  if (qty > 0 && up > 0) {
+    const totalEl = tr.querySelector('[data-r="total"]');
+    if (totalEl) totalEl.value = (qty * up).toFixed(2);
+  }
 }
 
 function onQEClientChange(sel, rowId) {
   const c = clientById(sel.value);
   const subSel = document.querySelector(`.qe-sub-${rowId}`);
   if (!subSel) return;
-  subSel.innerHTML = '<option value="">None</option>';
-  if (c && c.type==='Agency') c.subclients.forEach(sc=>{ const o=document.createElement('option'); o.value=sc; o.textContent=sc; subSel.appendChild(o); });
+  const subs = c?.subclients || [];
+  subSel.innerHTML = '<option value="">None</option>' + subs.map(s => `<option value="${s}">${s}</option>`).join('');
+  subSel.disabled = subs.length === 0;
 }
 
 function saveQEIncomeRow(rowId) {
   const tr = document.getElementById(rowId);
   if (!tr) return;
-  const sels = tr.querySelectorAll('select');
-  const inps = tr.querySelectorAll('input');
+  const sels      = tr.querySelectorAll('select');
+  const dateEl    = tr.querySelector('.qe-date');
+  const serviceEl = tr.querySelector('input[list="servicesList"]');
   const clientId  = sels[0].value;
   const subClient = sels[1].value;
-  const service   = inps[0].value.trim();
-  const amount    = parseFloat(inps[1].value);
-  const payType   = sels[2].value;
-  const rawDate   = inps[2].value;
-  const date      = rawDate.length===7 ? rawDate+'-01' : rawDate;
-  const status    = sels[3].value;
+  const service   = serviceEl?.value.trim() || 'Video Editing';
+  const qty       = parseFloat(tr.querySelector('[data-r="qty"]')?.value)   || 0;
+  const up        = parseFloat(tr.querySelector('[data-r="up"]')?.value)    || 0;
+  const totalVal  = parseFloat(tr.querySelector('[data-r="total"]')?.value) || 0;
+  const note      = tr.querySelector('[data-r="note"]')?.value.trim()       || '';
+  const payType   = tr.querySelector('[data-r="pay"]')?.value               || 'cash';
+  const status    = tr.querySelector('[data-r="status"]')?.value            || 'Paid';
+  const rawDate   = dateEl?.value || '';
+  const date      = rawDate.length === 7 ? rawDate + '-01' : rawDate;
+  const amount    = totalVal > 0 ? totalVal : (qty > 0 && up > 0 ? qty * up : 0);
 
-  if (!clientId)       { flashRow(tr,'error'); showToast('Select a client','error'); return; }
-  if (!service)        { flashRow(tr,'error'); showToast('Enter a service','error'); return; }
-  if (!amount||amount<=0){ flashRow(tr,'error'); showToast('Enter a valid amount','error'); return; }
-  if (!rawDate)        { flashRow(tr,'error'); showToast('Select a date','error'); return; }
+  if (!clientId)         { flashRow(tr,'error'); showToast('Select a client','error'); return; }
+  if (!amount||amount<=0){ flashRow(tr,'error'); showToast('Enter an amount','error'); return; }
+  if (!rawDate)          { flashRow(tr,'error'); showToast('Select a date','error'); return; }
 
   const entry = { id:genId(), clientId, subClient, service, amount,
     vatAmount: payType==='invoice' ? amount*VAT_RATE : 0,
-    paymentType:payType, date, status, notes:'', createdAt:Date.now() };
+    paymentType:payType, date, status, notes:note, createdAt:Date.now() };
   state.income.push(entry);
   saveData();
   sheetsAdd('income', entry);
   flashRow(tr,'success');
-  setTimeout(()=>tr.remove(), 500);
+  setTimeout(() => tr.remove(), 500);
   showToast(`Saved — ${fmt(amount)}`);
 }
 
 function renderQEExpense(cont) {
-  const catOpts = Object.keys(CATEGORY_ICONS).map(cat=>`<option value="${cat}">${CATEGORY_ICONS[cat]} ${cat}</option>`).join('');
   cont.innerHTML = `
-    <div class="qe-info"><i class="fa-solid fa-lightbulb"></i> Tab between cells · Press ✓ to save a row · <kbd>Enter</kbd> in last cell also saves</div>
+    <div class="qe-info"><i class="fa-solid fa-lightbulb"></i> Tab between cells · Press ✓ to save a row · <kbd>Enter</kbd> in Note field also saves</div>
     <div class="qe-table-wrapper">
       <table class="qe-table">
         <thead><tr>
-          <th>Category</th><th>Vendor</th><th>Total Amount (€)</th>
+          <th>Category</th><th>Vendor</th><th>Amount (€)</th><th>Note</th>
           <th>Has VAT?</th><th>Payment</th><th>Monthly?</th><th>Date</th><th></th>
         </tr></thead>
         <tbody id="qeExpenseBody"></tbody>
       </table>
     </div>
     <button class="qe-add-row-btn" onclick="addQEExpenseRow()"><i class="fa-solid fa-plus"></i> Add Row</button>`;
-  for (let i=0;i<3;i++) addQEExpenseRow();
+  for (let i = 0; i < 3; i++) addQEExpenseRow();
 }
 
 function addQEExpenseRow() {
   const tbody = document.getElementById('qeExpenseBody');
   if (!tbody) return;
-  const rowId  = 'qer-'+genId();
-  const catOpts = Object.keys(CATEGORY_ICONS).map(cat=>`<option value="${cat}">${CATEGORY_ICONS[cat]} ${cat}</option>`).join('');
+  const rowId = 'qer-' + genId();
+  const catOpts = Object.keys(CATEGORY_ICONS).map(cat => `<option value="${cat}">${CATEGORY_ICONS[cat]} ${cat}</option>`).join('');
   const tr = document.createElement('tr');
   tr.id = rowId; tr.className = 'qe-row';
   tr.innerHTML = `
     <td><select class="qe-cell qe-select"><option value="">— Category —</option>${catOpts}</select></td>
     <td><input class="qe-cell qe-input" type="text" placeholder="Vendor…" /></td>
     <td><input class="qe-cell qe-input qe-num" type="number" placeholder="0.00" step="0.01" min="0" /></td>
+    <td><input class="qe-cell qe-input" type="text" placeholder="Note…" data-r="note" /></td>
     <td><select class="qe-cell qe-select"><option value="no">No</option><option value="yes">Yes (24%)</option></select></td>
     <td><select class="qe-cell qe-select"><option value="Credit Card">Card</option><option value="Cash">Cash</option></select></td>
     <td><select class="qe-cell qe-select"><option value="no">No</option><option value="yes">Yes</option></select></td>
     <td><div class="qe-date-wrap"><input class="qe-cell qe-input qe-date" type="date" value="${todayVal()}" /><button class="qe-date-toggle" title="Toggle month/date" onclick="toggleQEDate(this)">M</button></div></td>
     <td class="qe-actions">
       <button class="qe-save-btn" onclick="saveQEExpenseRow('${rowId}')" title="Save"><i class="fa-solid fa-check"></i></button>
-      <button class="qe-del-btn"  onclick="document.getElementById('${rowId}').remove()" title="Remove"><i class="fa-solid fa-times"></i></button>
+      <button class="qe-del-btn" onclick="document.getElementById('${rowId}').remove()" title="Remove"><i class="fa-solid fa-times"></i></button>
     </td>`;
   tbody.appendChild(tr);
-  const inputs = tr.querySelectorAll('.qe-input,.qe-select');
-  inputs[inputs.length-1].addEventListener('keydown', e=>{ if(e.key==='Enter'){e.preventDefault();saveQEExpenseRow(rowId);} });
+  tr.querySelector('[data-r="note"]').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); saveQEExpenseRow(rowId); }
+  });
 }
 
 function saveQEExpenseRow(rowId) {
   const tr = document.getElementById(rowId);
   if (!tr) return;
-  const sels = tr.querySelectorAll('select');
-  const inps = tr.querySelectorAll('input');
+  const sels          = tr.querySelectorAll('select');
   const category      = sels[0].value;
-  const vendor        = inps[0].value.trim();
-  const amount        = parseFloat(inps[1].value);
-  const hasVAT        = sels[1].value==='yes';
+  const vendor        = tr.querySelectorAll('input')[0].value.trim();
+  const amount        = parseFloat(tr.querySelectorAll('input')[1].value);
+  const note          = tr.querySelector('[data-r="note"]')?.value.trim() || '';
+  const hasVAT        = sels[1].value === 'yes';
   const paymentMethod = sels[2].value;
-  const recurring     = sels[3].value==='yes';
-  const rawDate       = inps[2].value;
-  const date          = rawDate.length===7 ? rawDate+'-01' : rawDate;
+  const recurring     = sels[3].value === 'yes';
+  const rawDate       = tr.querySelector('.qe-date')?.value || '';
+  const date          = rawDate.length === 7 ? rawDate + '-01' : rawDate;
 
-  if (!category)       { flashRow(tr,'error'); showToast('Select a category','error'); return; }
-  if (!vendor)         { flashRow(tr,'error'); showToast('Enter a vendor','error'); return; }
+  if (!category)         { flashRow(tr,'error'); showToast('Select a category','error'); return; }
+  if (!vendor)           { flashRow(tr,'error'); showToast('Enter a vendor','error'); return; }
   if (!amount||amount<=0){ flashRow(tr,'error'); showToast('Enter a valid amount','error'); return; }
-  if (!rawDate)        { flashRow(tr,'error'); showToast('Select a date','error'); return; }
+  if (!rawDate)          { flashRow(tr,'error'); showToast('Select a date','error'); return; }
 
-  const vatAmount = hasVAT ? amount-(amount/1.24) : 0;
-  const entry = { id:genId(), category, vendor, description:'', amount, vatAmount, paymentMethod, recurring, date, createdAt:Date.now() };
+  const vatAmount = hasVAT ? amount - (amount / 1.24) : 0;
+  const entry = { id:genId(), category, vendor, description:note, amount, vatAmount, paymentMethod, recurring, date, notes:note, createdAt:Date.now() };
   state.expenses.push(entry);
   saveData();
   sheetsAdd('expense', entry);
   flashRow(tr,'success');
-  setTimeout(()=>tr.remove(), 500);
+  setTimeout(() => tr.remove(), 500);
   showToast(`Saved — ${fmt(amount)}`);
 }
 
