@@ -2016,37 +2016,103 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
    BY CLIENT / BY CATEGORY VIEW
    ============================================================ */
 .byclient-group {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border);
 }
 .byclient-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 12px 16px 12px 20px;
   background: var(--bg-sidebar);
+  cursor: pointer;
+  transition: background 0.15s;
 }
+.byclient-header:hover { background: var(--bg-card2); }
 .byclient-name {
   display: flex;
   align-items: center;
   gap: 10px;
   font-weight: 700;
   font-size: 14px;
+  min-width: 150px;
 }
+.bc-meta {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.bc-count { font-weight: 600; color: var(--text); }
+.bc-subs  { color: var(--accent-hover); font-style: italic; }
+.bc-dates { opacity: .6; }
 .byclient-totals {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 .byclient-paid  { font-weight: 800; color: var(--green); font-size: 15px; }
 .byclient-pending { font-size: 11px; color: var(--amber); }
+/* Collapse/expand */
+.bc-chevron { color: var(--text-muted); font-size: 11px; transition: transform 0.2s; flex-shrink: 0; }
+.byclient-group.expanded .bc-chevron { transform: rotate(90deg); }
+.byclient-entries { display: none; }
+.byclient-group.expanded .byclient-entries { display: block; }
 .byclient-group .entry-compact {
   border-radius: 0;
   border-top: 1px solid rgba(255,255,255,0.04);
 }
+
+/* Excel table view */
+.excel-wrapper { overflow-x: auto; padding-bottom: 12px; }
+.excel-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 12px; min-width: 700px;
+}
+.excel-table thead th {
+  background: rgba(99,102,241,0.25);
+  color: var(--text);
+  padding: 9px 12px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: .3px;
+  white-space: nowrap;
+  border: 1px solid rgba(99,102,241,0.2);
+  position: sticky; top: 0;
+}
+.excel-table tbody tr { transition: background 0.1s; }
+.excel-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+.excel-table tbody tr:hover { background: rgba(99,102,241,0.07); }
+.excel-table td {
+  padding: 6px 12px;
+  border: 1px solid rgba(255,255,255,0.05);
+  white-space: nowrap;
+  vertical-align: middle;
+  font-size: 12px;
+}
+.xls-idx { color: var(--text-muted); text-align: right; font-size: 10px; width: 32px; }
+.xls-num { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.xls-note { max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
+.xls-foot-label { text-align: right; font-weight: 700; font-size: 11px; letter-spacing: .5px; color: var(--text-muted); background: rgba(255,255,255,0.03); }
+.xls-foot-val { font-weight: 800; font-size: 14px; background: rgba(255,255,255,0.03); }
+.xls-row-paid   td { }
+.xls-row-pending td { background: rgba(245,158,11,0.04); }
+.xls-row-overdue td { background: rgba(239,68,68,0.05); }
+.excel-copy-btn {
+  margin-top: 10px; padding: 8px 18px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: 8px; cursor: pointer; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: var(--transition);
+}
+.excel-copy-btn:hover { color: var(--text); border-color: var(--accent); }
 .ec-date { min-width: 72px; font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 
 /* ============================================================
@@ -2327,19 +2393,19 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .qe-exp-day-td { padding: 4px 6px; vertical-align: middle; }
 .qe-exp-slots { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 2px 0; }
 .qe-exp-slot {
-  display: flex; align-items: center; gap: 3px;
+  display: flex; align-items: center; gap: 4px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 3px 5px;
+  padding: 4px 7px;
 }
 .qe-exp-cat {
-  width: 108px; padding: 3px 4px;
+  width: 130px; padding: 4px 6px;
   background: transparent; border: none; color: var(--text);
-  font-size: 11px; cursor: pointer; outline: none;
+  font-size: 12px; cursor: pointer; outline: none;
 }
 .qe-exp-cat:focus { color: var(--accent-hover); }
-.qe-exp-amt { width: 56px; }
+.qe-exp-amt { width: 68px; padding: 5px 5px; }
 .qe-exp-remove {
   background: none; border: none; color: var(--text-muted);
   cursor: pointer; padding: 2px 3px; font-size: 9px;

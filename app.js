@@ -751,6 +751,18 @@ function updateSplitPreview() {
 
 function setIncViewMode(m) { incViewMode = m; renderIncome(); }
 function setExpViewMode(m) { expViewMode = m; renderExpenses(); }
+function toggleClientGroup(cid) {
+  document.querySelector('.byclient-group[data-cid="'+cid+'"]')?.classList.toggle('expanded');
+}
+function copyExcelTable(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const range = document.createRange(); range.selectNode(el);
+  window.getSelection().removeAllRanges(); window.getSelection().addRange(range);
+  try { document.execCommand('copy'); showToast('Table copied — paste into Excel / Google Sheets'); }
+  catch(e) { showToast('Select the table manually to copy','error'); }
+  window.getSelection().removeAllRanges();
+}
 
 function setPaymentType(t) {
   incomePaymentType = t;
@@ -1673,7 +1685,7 @@ function saveQEExpenseGrid() {
     const noteInp  = slotEl.querySelector('[data-type="expnote"]');
     const category = catSel?.value||''; const amount = parseFloat(amtInp?.value)||0;
     const note = noteInp?.value.trim()||''; const entryId = amtInp?.dataset.entryId||'';
-    if (!category||amount<=0) return;
+    if (amount<=0) return;
     if (entryId) {
       const xi = state.expenses.findIndex(e=>e.id===entryId);
       if (xi>=0) state.expenses[xi] = {...state.expenses[xi], category, amount, vendor:note, description:note};
@@ -1909,7 +1921,7 @@ function renderIncome() {
   </div>`;
 
   const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('detailed','list-ul','Detailed')}${vtInc('cards','grip','Cards')}</div></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('detailed','list-ul','Detailed')}${vtInc('cards','grip','Cards')}${vtInc('excel','table','Excel')}</div></div>`;
 
   let entries = [...state.income];
   if (incMonth!=='all')   entries=entries.filter(e=>monthKey(e.date)===incMonth);
@@ -1930,7 +1942,7 @@ function renderIncome() {
     <button class="ea-btn ea-del"  title="Delete" onclick="confirmDelete('income','${id}')"><i class="fa-solid fa-trash"></i></button>
   </div>`;
 
-  // ── By Client view (groups entries by client, not by month) ────
+  // ── By Client view — collapsed summaries, click to expand ─────
   if (incViewMode==='byclient') {
     const byClient = {};
     entries.forEach(e=>{ if(!byClient[e.clientId])byClient[e.clientId]=[]; byClient[e.clientId].push(e); });
@@ -1944,31 +1956,79 @@ function renderIncome() {
         const c=clientById(cid);
         const paid=grp.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
         const pend=grp.filter(e=>e.status!=='Paid').reduce((s,e)=>s+e.amount,0);
+        const subs=[...new Set(grp.map(e=>e.subClient).filter(Boolean))];
+        const dates=grp.map(e=>e.date).sort();
+        const span=dates[0]===dates[dates.length-1]?toDateStr(dates[0]):toDateStr(dates[0])+' – '+toDateStr(dates[dates.length-1]);
         const av = c?.image
-          ? `<img src="${c.image}" style="width:28px;height:28px;object-fit:cover;border-radius:50%;flex-shrink:0">`
-          : `<span class="entry-client-dot" style="background:${c?.color||'#888'};width:28px;height:28px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">${initials(c?.name||'?')}</span>`;
-        html+=`<div class="byclient-group">
-          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}">
-            <div class="byclient-name">${av}<span>${c?.name||'Unknown'}</span></div>
-            <div class="byclient-totals">
-              <span class="byclient-paid">${fmt(paid)}</span>
-              ${pend>0?`<span class="byclient-pending">+${fmt(pend)} pending</span>`:''}
-            </div>
-          </div>`;
-        grp.sort((a,b)=>b.date.localeCompare(a.date)).forEach(e=>{
+          ? `<img src="${c.image}" style="width:30px;height:30px;object-fit:cover;border-radius:50%;flex-shrink:0">`
+          : `<span class="entry-client-dot" style="background:${c?.color||'#888'};width:30px;height:30px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">${initials(c?.name||'?')}</span>`;
+        const entriesHtml = grp.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{
           const sl=e.status.toLowerCase();
-          html+=`<div class="entry-compact ${sl}" onclick="openEntryDetail('income','${e.id}')">
+          return `<div class="entry-compact ${sl}" onclick="openEntryDetail('income','${e.id}')">
             <span class="ec-date">${toDateStr(e.date)}</span>
             <span class="ec-sep">·</span>
-            <span class="ec-service">${e.service}${e.subClient?' <em style="opacity:.6">· '+e.subClient+'</em>':''}</span>
+            <span class="ec-service">${e.service}${e.subClient?` <em style="opacity:.6">· ${e.subClient}</em>`:''}</span>
             <span class="ec-amount">${fmt(e.amount)}</span>
             <span class="badge ${e.paymentType} mini">${e.paymentType==='invoice'?'INV':'CASH'}</span>
             <span class="badge ${sl} mini">${e.status.slice(0,3).toUpperCase()}</span>
             ${eaInc(e.id)}
           </div>`;
-        });
-        html+='</div>';
+        }).join('');
+        html+=`<div class="byclient-group" data-cid="${cid}">
+          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}" onclick="toggleClientGroup('${cid}')">
+            <div class="byclient-name">${av}<span>${c?.name||'Unknown'}</span></div>
+            <div class="bc-meta">
+              <span class="bc-count">${grp.length} payment${grp.length>1?'s':''}</span>
+              ${subs.length?`<span class="bc-subs">${subs.join(', ')}</span>`:''}
+              <span class="bc-dates">${span}</span>
+            </div>
+            <div class="byclient-totals">
+              <span class="byclient-paid">${fmt(paid)}</span>
+              ${pend>0?`<span class="byclient-pending">+${fmt(pend)} pend.</span>`:''}
+            </div>
+            <i class="fa-solid fa-chevron-right bc-chevron"></i>
+          </div>
+          <div class="byclient-entries">${entriesHtml}</div>
+        </div>`;
       });
+    cont.innerHTML = html; return;
+  }
+
+  // ── Excel view — Income ────────────────────────────────────────
+  if (incViewMode==='excel') {
+    const totalPaid = entries.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
+    const totalAll  = entries.reduce((s,e)=>s+e.amount,0);
+    const rows = entries.map((e,i)=>{
+      const c=clientById(e.clientId); const sl=e.status.toLowerCase();
+      return `<tr class="xls-row-${sl}">
+        <td class="xls-idx">${i+1}</td>
+        <td>${toDateStr(e.date)}</td>
+        <td style="color:${c?.color||'var(--text)'}"><strong>${c?.name||'?'}</strong></td>
+        <td>${e.subClient||'—'}</td>
+        <td>${e.service}</td>
+        <td class="xls-num">${fmt(e.amount)}</td>
+        <td class="xls-num" style="opacity:.7">${e.vatAmount>0?fmt(e.vatAmount):'—'}</td>
+        <td><span class="badge ${sl} mini">${e.status}</span></td>
+        <td><span class="badge ${e.paymentType} mini">${e.paymentType==='invoice'?'Invoice':'Cash'}</span></td>
+        <td class="xls-note">${e.notes||'—'}</td>
+        <td><div class="entry-actions" onclick="event.stopPropagation()">${eaInc(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
+      </tr>`;
+    }).join('');
+    html+=`<div class="excel-wrapper">
+      <table class="excel-table" id="incExcelTbl">
+        <thead><tr>
+          <th style="width:32px">#</th><th>Date</th><th>Client</th><th>Subclient</th>
+          <th>Service</th><th>Amount (€)</th><th>VAT (€)</th><th>Status</th><th>Type</th><th>Notes</th><th style="width:90px"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr>
+          <td colspan="5" class="xls-foot-label">TOTAL PAID / ALL</td>
+          <td class="xls-num xls-foot-val">${fmt(totalPaid)} / ${fmt(totalAll)}</td>
+          <td colspan="5"></td>
+        </tr></tfoot>
+      </table>
+      <button class="excel-copy-btn" onclick="copyExcelTable('incExcelTbl')"><i class="fa-solid fa-copy"></i> Copy to clipboard (paste in Excel)</button>
+    </div>`;
     cont.innerHTML = html; return;
   }
 
@@ -2039,7 +2099,7 @@ function renderExpenses() {
     </div>
   </div>`;
   const vtExp = (m,icon,label) => `<button class="vtb ${expViewMode===m?'active':''}" title="${label}" onclick="setExpViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('detailed','list-ul','Detailed')}${vtExp('cards','grip','Cards')}</div></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('detailed','list-ul','Detailed')}${vtExp('cards','grip','Cards')}${vtExp('excel','table','Excel')}</div></div>`;
 
   let entries = [...state.expenses];
   if (expMonth!=='all')    entries=entries.filter(e=>monthKey(e.date)===expMonth);
@@ -2084,6 +2144,42 @@ function renderExpenses() {
         });
         html+='</div>';
       });
+    cont.innerHTML = html; return;
+  }
+
+  // ── Excel view — Expenses ──────────────────────────────────────
+  if (expViewMode==='excel') {
+    const totalAll = entries.reduce((s,e)=>s+e.amount,0);
+    const rows = entries.map((e,i)=>{
+      const icon=CATEGORY_ICONS[e.category]||'📦';
+      return `<tr>
+        <td class="xls-idx">${i+1}</td>
+        <td>${toDateStr(e.date)}</td>
+        <td>${icon} ${e.category||'—'}</td>
+        <td>${e.vendor||'—'}</td>
+        <td class="xls-note">${e.description||'—'}</td>
+        <td class="xls-num" style="color:var(--red)">${fmt(e.amount)}</td>
+        <td class="xls-num" style="opacity:.7">${e.vatAmount>0?fmt(e.vatAmount):'—'}</td>
+        <td>${e.paymentMethod||'—'}</td>
+        <td>${e.recurring?'🔄 Yes':'No'}</td>
+        <td><div class="entry-actions" onclick="event.stopPropagation()">${eaExp(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
+      </tr>`;
+    }).join('');
+    html+=`<div class="excel-wrapper">
+      <table class="excel-table" id="expExcelTbl">
+        <thead><tr>
+          <th style="width:32px">#</th><th>Date</th><th>Category</th><th>Vendor</th>
+          <th>Description</th><th>Amount (€)</th><th>VAT (€)</th><th>Payment</th><th>Recurring</th><th style="width:90px"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr>
+          <td colspan="5" class="xls-foot-label">TOTAL</td>
+          <td class="xls-num xls-foot-val" style="color:var(--red)">${fmt(totalAll)}</td>
+          <td colspan="4"></td>
+        </tr></tfoot>
+      </table>
+      <button class="excel-copy-btn" onclick="copyExcelTable('expExcelTbl')"><i class="fa-solid fa-copy"></i> Copy to clipboard (paste in Excel)</button>
+    </div>`;
     cont.innerHTML = html; return;
   }
 
