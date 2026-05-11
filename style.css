@@ -2322,3 +2322,34 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   filter: brightness(1.1);
   transform: translateY(-1px);
 }
+
+/* ── Expense QE Grid slots ── */
+.qe-exp-day-td { padding: 4px 6px; vertical-align: middle; }
+.qe-exp-slots { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 2px 0; }
+.qe-exp-slot {
+  display: flex; align-items: center; gap: 3px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px 5px;
+}
+.qe-exp-cat {
+  width: 108px; padding: 3px 4px;
+  background: transparent; border: none; color: var(--text);
+  font-size: 11px; cursor: pointer; outline: none;
+}
+.qe-exp-cat:focus { color: var(--accent-hover); }
+.qe-exp-amt { width: 56px; }
+.qe-exp-remove {
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; padding: 2px 3px; font-size: 9px;
+  opacity: 0.4; transition: opacity 0.15s, color 0.15s; line-height: 1;
+}
+.qe-exp-remove:hover { opacity: 1; color: var(--red); }
+.qe-exp-add-slot-btn {
+  background: none; border: 1px dashed rgba(255,255,255,0.12);
+  color: var(--text-muted); cursor: pointer;
+  padding: 3px 9px; border-radius: 6px; font-size: 11px;
+  transition: var(--transition); flex-shrink: 0;
+}
+.qe-exp-add-slot-btn:hover { color: var(--accent-hover); border-color: var(--accent); background: var(--accent-light); }

@@ -86,6 +86,8 @@ let qeGridService = 'Video Editing';
 let qeGridStatus = 'Paid';
 let qeGridPayType = 'cash';
 let qeGridData = {}; // persistent grid state: key = "type|clientId|date|sub", value = string
+let qeExpenseGridData = {}; // expense QE: { date: [{id,category,amount,note}] }
+let qeExpPayMethod = 'Cash';
 
 // Form state
 let incomePaymentType = 'invoice';
@@ -1496,75 +1498,196 @@ function toggleQEDate(btn) {
   }
 }
 
-function renderQEExpense(cont) {
-  cont.innerHTML = `
-    <div class="qe-info"><i class="fa-solid fa-lightbulb"></i> Tab between cells · Press ✓ to save a row · <kbd>Enter</kbd> in Note field also saves</div>
-    <div class="qe-table-wrapper">
-      <table class="qe-table">
-        <thead><tr>
-          <th>Category</th><th>Vendor</th><th>Amount (€)</th><th>Note</th>
-          <th>Has VAT?</th><th>Payment</th><th>Monthly?</th><th>Date</th><th></th>
-        </tr></thead>
-        <tbody id="qeExpenseBody"></tbody>
-      </table>
-    </div>
-    <button class="qe-add-row-btn" onclick="addQEExpenseRow()"><i class="fa-solid fa-plus"></i> Add Row</button>`;
-  for (let i = 0; i < 3; i++) addQEExpenseRow();
-}
+/* ── Expense QE Grid ────────────────────────────────────────── */
 
-function addQEExpenseRow() {
-  const tbody = document.getElementById('qeExpenseBody');
-  if (!tbody) return;
-  const rowId = 'qer-' + genId();
-  const catOpts = Object.keys(CATEGORY_ICONS).map(cat => `<option value="${cat}">${CATEGORY_ICONS[cat]} ${cat}</option>`).join('');
-  const tr = document.createElement('tr');
-  tr.id = rowId; tr.className = 'qe-row';
-  tr.innerHTML = `
-    <td><select class="qe-cell qe-select"><option value="">— Category —</option>${catOpts}</select></td>
-    <td><input class="qe-cell qe-input" type="text" placeholder="Vendor…" /></td>
-    <td><input class="qe-cell qe-input qe-num" type="number" placeholder="0.00" step="0.01" min="0" /></td>
-    <td><input class="qe-cell qe-input" type="text" placeholder="Note…" data-r="note" /></td>
-    <td><select class="qe-cell qe-select"><option value="no">No</option><option value="yes">Yes (24%)</option></select></td>
-    <td><select class="qe-cell qe-select"><option value="Credit Card">Card</option><option value="Cash">Cash</option></select></td>
-    <td><select class="qe-cell qe-select"><option value="no">No</option><option value="yes">Yes</option></select></td>
-    <td><div class="qe-date-wrap"><input class="qe-cell qe-input qe-date" type="date" value="${todayVal()}" /><button class="qe-date-toggle" title="Toggle month/date" onclick="toggleQEDate(this)">M</button></div></td>
-    <td class="qe-actions">
-      <button class="qe-save-btn" onclick="saveQEExpenseRow('${rowId}')" title="Save"><i class="fa-solid fa-check"></i></button>
-      <button class="qe-del-btn" onclick="document.getElementById('${rowId}').remove()" title="Remove"><i class="fa-solid fa-times"></i></button>
-    </td>`;
-  tbody.appendChild(tr);
-  tr.querySelector('[data-r="note"]').addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); saveQEExpenseRow(rowId); }
+function captureQEExpGridData() {
+  const table = document.getElementById('qeExpSpreadsheet');
+  if (!table) return;
+  // Reset only days of the current month
+  const [yr,mo] = qeGridMonth.split('-').map(Number);
+  const dim = new Date(yr,mo,0).getDate();
+  for (let i=1;i<=dim;i++) {
+    const ds = qeGridMonth+'-'+String(i).padStart(2,'0');
+    qeExpenseGridData[ds] = [];
+  }
+  table.querySelectorAll('.qe-exp-slot[data-date]').forEach(slotEl=>{
+    const ds = slotEl.dataset.date;
+    const cat  = slotEl.querySelector('[data-type="expcategory"]')?.value||'';
+    const amt  = slotEl.querySelector('[data-type="expamount"]');
+    const note = slotEl.querySelector('[data-type="expnote"]')?.value||'';
+    if (!qeExpenseGridData[ds]) qeExpenseGridData[ds]=[];
+    qeExpenseGridData[ds].push({ id:amt?.dataset.entryId||'', category:cat, amount:amt?.value||'', note });
+  });
+  // Drop fully-empty date buckets so they reload fresh from state next time
+  Object.keys(qeExpenseGridData).forEach(ds=>{
+    if ((qeExpenseGridData[ds]||[]).every(s=>!s.category&&!s.amount&&!s.note)) delete qeExpenseGridData[ds];
   });
 }
 
-function saveQEExpenseRow(rowId) {
-  const tr = document.getElementById(rowId);
-  if (!tr) return;
-  const sels          = tr.querySelectorAll('select');
-  const category      = sels[0].value;
-  const vendor        = tr.querySelectorAll('input')[0].value.trim();
-  const amount        = parseFloat(tr.querySelectorAll('input')[1].value);
-  const note          = tr.querySelector('[data-r="note"]')?.value.trim() || '';
-  const hasVAT        = sels[1].value === 'yes';
-  const paymentMethod = sels[2].value;
-  const recurring     = sels[3].value === 'yes';
-  const rawDate       = tr.querySelector('.qe-date')?.value || '';
-  const date          = rawDate.length === 7 ? rawDate + '-01' : rawDate;
+function initQEExpFromState() {
+  const [yr,mo] = qeGridMonth.split('-').map(Number);
+  const dim = new Date(yr,mo,0).getDate();
+  for (let i=1;i<=dim;i++) {
+    const ds = qeGridMonth+'-'+String(i).padStart(2,'0');
+    if (!qeExpenseGridData[ds]) {
+      const saved = state.expenses.filter(e=>e.date===ds);
+      if (saved.length) qeExpenseGridData[ds] = saved.map(e=>({
+        id:e.id, category:e.category||'', amount:e.amount?String(e.amount):'', note:e.vendor||e.description||''
+      }));
+    }
+  }
+}
 
-  if (!category)         { flashRow(tr,'error'); showToast('Select a category','error'); return; }
-  if (!vendor)           { flashRow(tr,'error'); showToast('Enter a vendor','error'); return; }
-  if (!amount||amount<=0){ flashRow(tr,'error'); showToast('Enter a valid amount','error'); return; }
-  if (!rawDate)          { flashRow(tr,'error'); showToast('Select a date','error'); return; }
+function renderQEExpSlotHTML(ds, slot, si) {
+  const catOpts = Object.keys(CATEGORY_ICONS).map(cat=>
+    '<option value="'+cat+'" '+(slot.category===cat?'selected':'')+'>'+CATEGORY_ICONS[cat]+' '+cat+'</option>'
+  ).join('');
+  const hasNote = !!slot.note;
+  return '<div class="qe-exp-slot" data-date="'+ds+'" data-slot="'+si+'">'
+    +'<select class="qe-sp-inp qe-exp-cat" data-type="expcategory" onchange="updateQEExpDayTotal(\''+ds+'\')">'
+      +'<option value="">Cat…</option>'+catOpts+'</select>'
+    +'<input class="qe-sp-inp qe-exp-amt" type="number" placeholder="—" min="0" step="0.01"'
+      +' value="'+(slot.amount||'')+'" data-type="expamount" data-entry-id="'+(slot.id||'')+'"'
+      +' oninput="updateQEExpDayTotal(\''+ds+'\')" />'
+    +'<button class="qe-note-pen" onclick="toggleSubNote(this)" title="Vendor/Note"'
+      +' style="'+(hasNote?'display:none':'')+'"><i class="fa-solid fa-pencil"></i></button>'
+    +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="vendor / note…"'
+      +' value="'+(slot.note||'')+'" data-type="expnote"'
+      +' style="display:'+(hasNote?'block':'none')+'" onblur="qeSubNoteBlur(this)" />'
+    +'<button class="qe-exp-remove" onclick="removeQEExpSlot(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button>'
+  +'</div>';
+}
 
-  const vatAmount = hasVAT ? amount - (amount / 1.24) : 0;
-  const entry = { id:genId(), category, vendor, description:note, amount, vatAmount, paymentMethod, recurring, date, notes:note, createdAt:Date.now() };
-  state.expenses.push(entry);
-  saveData();
-  sheetsAdd('expense', entry);
-  flashRow(tr,'success');
-  setTimeout(() => tr.remove(), 500);
-  showToast(`Saved — ${fmt(amount)}`);
+function renderQEExpense(cont) {
+  captureQEExpGridData();
+  if (!qeGridMonth) qeGridMonth = todayVal().slice(0,7);
+  const [yr,mo] = qeGridMonth.split('-').map(Number);
+  const daysInMonth = new Date(yr,mo,0).getDate();
+  const today = todayVal();
+
+  initQEExpFromState();
+
+  const moOpts = (()=>{
+    const ms = allMonths(); if (!ms.includes(qeGridMonth)) ms.unshift(qeGridMonth);
+    return ms.map(m=>`<option value="${m}" ${m===qeGridMonth?'selected':''}>${monthLabel(m)}</option>`).join('');
+  })();
+
+  const bodyRows = Array.from({length:daysInMonth},(_,i)=>{
+    const day=i+1, ds=qeGridMonth+'-'+String(day).padStart(2,'0'), isToday=ds===today;
+    const slots = [...(qeExpenseGridData[ds]||[]), {id:'',category:'',amount:'',note:''}];
+    const slotsHtml = slots.map((s,si)=>renderQEExpSlotHTML(ds,s,si)).join('');
+    return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+ds+'">'
+      +'<td class="qe-td-day'+(isToday?' qe-today-day':'')+'">'+day+'</td>'
+      +'<td class="qe-exp-day-td">'
+        +'<div class="qe-exp-slots" id="qe-slots-'+ds+'">'+slotsHtml+'</div>'
+        +'<button class="qe-exp-add-slot-btn" onclick="addQEExpSlot(\''+ds+'\')"><i class="fa-solid fa-plus"></i></button>'
+      +'</td>'
+      +'<td class="qe-exp-day-total qe-td-total" data-date="'+ds+'" data-value="0">—</td>'
+    +'</tr>';
+  }).join('');
+
+  cont.innerHTML = `
+    <div class="qe-grid-controls">
+      <div class="qe-ctrl-row">
+        <div class="qe-ctrl-field">
+          <label class="qe-ctrl-label">Month</label>
+          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridMonth=this.value;renderQEExpense(document.getElementById('qeContent'))">${moOpts}</select>
+        </div>
+        <div class="qe-ctrl-field">
+          <label class="qe-ctrl-label">Payment</label>
+          <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeExpPayMethod=this.value">
+            <option value="Cash" ${qeExpPayMethod==='Cash'?'selected':''}>Cash</option>
+            <option value="Credit Card" ${qeExpPayMethod==='Credit Card'?'selected':''}>Credit Card</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="qe-spreadsheet-wrapper">
+      <table class="qe-spreadsheet" id="qeExpSpreadsheet">
+        <thead><tr>
+          <th class="qe-th-day">Day</th>
+          <th style="text-align:left;padding-left:10px;font-size:11px;color:var(--text-muted);font-weight:500">
+            Category &nbsp;·&nbsp; Amount &nbsp;·&nbsp; Vendor/Note &nbsp;
+            <span style="opacity:.45;font-weight:400">(click <i class="fa-solid fa-plus" style="font-size:9px"></i> to add more per day)</span>
+          </th>
+          <th class="qe-th-total">Day Total</th>
+        </tr></thead>
+        <tbody>${bodyRows}</tbody>
+        <tfoot><tr class="qe-sp-tfoot">
+          <td class="qe-tf-label">TOTAL</td><td></td>
+          <td class="qe-tf-grand qe-td-total" id="qeExpGrandTotal">—</td>
+        </tr></tfoot>
+      </table>
+    </div>
+    <button class="qe-save-grid-btn" onclick="saveQEExpenseGrid()"><i class="fa-solid fa-check"></i> Save All Filled Entries</button>`;
+
+  document.querySelectorAll('#qeExpSpreadsheet tbody tr[data-date]').forEach(tr=>updateQEExpDayTotal(tr.dataset.date));
+}
+
+function addQEExpSlot(dateStr) {
+  const cont = document.getElementById('qe-slots-'+dateStr);
+  if (!cont) return;
+  const si = cont.querySelectorAll('.qe-exp-slot').length;
+  cont.insertAdjacentHTML('beforeend', renderQEExpSlotHTML(dateStr,{id:'',category:'',amount:'',note:''},si));
+}
+
+function removeQEExpSlot(btn) {
+  const slotEl = btn.closest('.qe-exp-slot');
+  if (!slotEl) return;
+  const amtInp = slotEl.querySelector('[data-type="expamount"]');
+  const entryId = amtInp?.dataset.entryId;
+  const dateStr = slotEl.dataset.date;
+  if (entryId) {
+    state.expenses = state.expenses.filter(e=>e.id!==entryId);
+    if (qeExpenseGridData[dateStr]) qeExpenseGridData[dateStr] = qeExpenseGridData[dateStr].filter(s=>s.id!==entryId);
+    saveData(); showToast('Expense removed');
+  }
+  slotEl.remove();
+  updateQEExpDayTotal(dateStr);
+}
+
+function updateQEExpDayTotal(dateStr) {
+  const cont = document.getElementById('qe-slots-'+dateStr);
+  let total = 0;
+  cont?.querySelectorAll('[data-type="expamount"]').forEach(inp=>{ total += parseFloat(inp.value)||0; });
+  const tc = document.querySelector('.qe-exp-day-total[data-date="'+dateStr+'"]');
+  if (tc) { tc.textContent = total>0?fmt(total):'—'; tc.dataset.value=total; }
+  updateQEExpGrandTotal();
+}
+
+function updateQEExpGrandTotal() {
+  let grand=0;
+  document.querySelectorAll('.qe-exp-day-total').forEach(c=>{ grand+=parseFloat(c.dataset.value)||0; });
+  const g = document.getElementById('qeExpGrandTotal');
+  if (g) g.textContent = grand>0?fmt(grand):'—';
+}
+
+function saveQEExpenseGrid() {
+  const table = document.getElementById('qeExpSpreadsheet');
+  if (!table) return;
+  let savedCount=0, savedTotal=0;
+  table.querySelectorAll('.qe-exp-slot[data-date]').forEach(slotEl=>{
+    const dateStr  = slotEl.dataset.date;
+    const catSel   = slotEl.querySelector('[data-type="expcategory"]');
+    const amtInp   = slotEl.querySelector('[data-type="expamount"]');
+    const noteInp  = slotEl.querySelector('[data-type="expnote"]');
+    const category = catSel?.value||''; const amount = parseFloat(amtInp?.value)||0;
+    const note = noteInp?.value.trim()||''; const entryId = amtInp?.dataset.entryId||'';
+    if (!category||amount<=0) return;
+    if (entryId) {
+      const xi = state.expenses.findIndex(e=>e.id===entryId);
+      if (xi>=0) state.expenses[xi] = {...state.expenses[xi], category, amount, vendor:note, description:note};
+    } else {
+      const entry = {id:genId(), category, vendor:note, description:note, amount, vatAmount:0,
+        paymentMethod:qeExpPayMethod, recurring:false, date:dateStr, notes:note, createdAt:Date.now()};
+      state.expenses.push(entry); sheetsAdd('expense',entry);
+      if (amtInp) amtInp.dataset.entryId = entry.id;
+    }
+    savedCount++; savedTotal+=amount;
+  });
+  if (!savedCount) { showToast('No entries to save','error'); return; }
+  saveData(); captureQEExpGridData();
+  showToast(savedCount+' expenses saved — '+fmt(savedTotal));
 }
 
 function flashRow(tr, type) {
