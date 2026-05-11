@@ -2220,6 +2220,9 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 .qe-sp-qty   { width: 48px; padding: 5px 4px; }
 .qe-sp-price { width: 60px; padding: 5px 4px; }
+.qe-sp-subprice { width: 46px; padding: 2px 4px; margin-top: 2px; font-size: 10px; color: var(--amber); opacity: 0.7; }
+.qe-sp-subprice:focus { opacity: 1; }
+.qe-sp-subprice::placeholder { color: var(--amber); opacity: 0.6; font-size: 9px; }
 .qe-sp-note-inp { width: 80px; padding: 5px 4px; text-align: left; font-style: italic; color: var(--text-muted); }
 .qe-sp-inp:focus { outline: none; border-color: var(--accent); background: rgba(99,102,241,0.12); }
 .qe-sp-inp:not(:placeholder-shown) { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.35); color: #a5b4fc; font-weight: 700; }
