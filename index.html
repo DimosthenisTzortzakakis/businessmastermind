@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Business Mastermind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon"><i class="fa-solid fa-chart-line"></i></div>
+      <div class="logo-text">
+        <span class="logo-title">Mastermind</span>
+        <span class="logo-sub">Business Tracker</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <a class="nav-item active" data-view="dashboard" onclick="navigate('dashboard')"><i class="fa-solid fa-gauge-high"></i><span>Dashboard</span></a>
+      <a class="nav-item" data-view="income" onclick="navigate('income')"><i class="fa-solid fa-arrow-trend-up"></i><span>Income</span></a>
+      <a class="nav-item" data-view="expenses" onclick="navigate('expenses')"><i class="fa-solid fa-arrow-trend-down"></i><span>Expenses</span></a>
+      <a class="nav-item" data-view="clients" onclick="navigate('clients')"><i class="fa-solid fa-users"></i><span>Clients</span></a>
+      <a class="nav-item" data-view="quickentry" onclick="navigate('quickentry')"><i class="fa-solid fa-table-cells"></i><span>Quick Entry</span></a>
+      <a class="nav-item" data-view="services" onclick="navigate('services')"><i class="fa-solid fa-briefcase"></i><span>Services</span></a>
+      <a class="nav-item" data-view="reports" onclick="navigate('reports')"><i class="fa-solid fa-chart-bar"></i><span>Reports</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="btn-sidebar-action" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate Recurring</button>
+      <button class="btn-sidebar-action" id="instantSyncBtn" style="display:none" onclick="instantSync()"><i class="fa-solid fa-rotate"></i> Instant Sync</button>
+      <button class="btn-sidebar-action" id="autoSyncBtn"   style="display:none" onclick="toggleAutoSync()"><i class="fa-solid fa-clock-rotate-left"></i> Auto Sync: OFF</button>
+      <button class="btn-sidebar-action" onclick="exportData()"><i class="fa-solid fa-download"></i> Export JSON</button>
+      <button class="btn-sidebar-action" onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-upload"></i> Import JSON</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content">
+    <div class="topbar">
+      <h1 class="topbar-title" id="topbarTitle">Dashboard</h1>
+      <div class="topbar-right">
+        <div class="search-wrapper">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input type="text" class="search-input" id="globalSearch" placeholder="Search clients, services, amounts…" oninput="onSearchInput()" autocomplete="off" />
+          <button class="search-clear hidden" id="searchClear" onclick="clearSearch()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="sync-badge hidden" id="syncBadge" onclick="sheetsSync()" title="Click to sync">
+          <span class="sync-icon">☁</span><span>Google Sheets</span>
+        </div>
+        <button class="btn-add-desktop" onclick="openAddPicker()"><i class="fa-solid fa-plus"></i> Add Entry</button>
+      </div>
+    </div>
+
+    <!-- Search results overlay -->
+    <div class="search-results-panel hidden" id="searchResultsPanel"></div>
+
+    <!-- DASHBOARD -->
+    <section class="view" id="view-dashboard">
+      <div class="month-pills-wrapper"><div class="month-pills" id="monthPills"></div></div>
+      <div class="kpi-grid" id="kpiGrid"></div>
+      <div class="recurring-banner" id="recurringBanner" style="display:none">
+        <i class="fa-solid fa-rotate"></i>
+        <span>Some recurring entries haven't been added for <strong id="recurBannerMonth"></strong> yet.</span>
+        <button onclick="generateRecurring()"><i class="fa-solid fa-plus"></i> Generate Now</button>
+      </div>
+      <div class="vat-summary" id="vatSummary"></div>
+      <div class="overview-columns">
+        <div class="overview-col">
+          <div class="overview-col-title"><i class="fa-solid fa-arrow-trend-up" style="color:var(--green)"></i> Income by Client</div>
+          <div id="incomeByClient"></div>
+        </div>
+        <div class="overview-col">
+          <div class="overview-col-title"><i class="fa-solid fa-arrow-trend-down" style="color:var(--red)"></i> Expenses by Category</div>
+          <div id="expensesByCategory"></div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-top:28px;margin-bottom:16px">Statistics</div>
+      <div class="stats-charts-row">
+        <div class="chart-card"><div class="chart-card-title">Revenue by Client</div><div class="chart-wrapper"><canvas id="chartByClient"></canvas></div></div>
+        <div class="chart-card"><div class="chart-card-title">Monthly Income vs Expenses</div><div class="chart-wrapper"><canvas id="chartMonthly"></canvas></div></div>
+      </div>
+      <div class="stats-tables-row" id="statsTablesRow"></div>
+    </section>
+
+    <!-- INCOME -->
+    <section class="view hidden" id="view-income">
+      <div id="incomeList"></div>
+    </section>
+
+    <!-- EXPENSES -->
+    <section class="view hidden" id="view-expenses">
+      <div id="expensesList"></div>
+    </section>
+
+    <!-- CLIENTS -->
+    <section class="view hidden" id="view-clients">
+      <div class="clients-header">
+        <div class="section-title" style="margin:0">All Clients</div>
+        <button class="btn-add-client" onclick="openAddClient()"><i class="fa-solid fa-plus"></i> Add Client</button>
+      </div>
+      <div class="clients-grid" id="clientsGrid"></div>
+    </section>
+
+    <!-- QUICK ENTRY -->
+    <section class="view hidden" id="view-quickentry">
+      <div class="qe-tabs">
+        <button class="qe-tab active" id="qeTabIncome" onclick="setQETab('income')"><i class="fa-solid fa-arrow-trend-up"></i> Income Entries</button>
+        <button class="qe-tab" id="qeTabExpense" onclick="setQETab('expense')"><i class="fa-solid fa-arrow-trend-down"></i> Expense Entries</button>
+      </div>
+      <div id="qeContent"></div>
+    </section>
+
+    <!-- SERVICES -->
+    <section class="view hidden" id="view-services">
+      <div class="services-header">
+        <div class="section-title" style="margin:0">My Services</div>
+      </div>
+      <div class="services-grid" id="servicesGrid"></div>
+      <div class="service-add-form">
+        <input type="text" class="form-input" id="newServiceInput" placeholder="Add new service… (e.g. Brand Photography)" onkeydown="if(event.key==='Enter'){event.preventDefault();addService();}" autocomplete="off" />
+        <button class="btn-service-add" onclick="addService()"><i class="fa-solid fa-plus"></i> Add Service</button>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section class="view hidden" id="view-reports">
+      <div class="reports-container" id="reportsContainer"></div>
+    </section>
+  </main>
+
+  <!-- MOBILE BOTTOM NAV -->
+  <nav class="bottom-nav">
+    <a class="bottom-nav-item active" data-view="dashboard" onclick="navigate('dashboard')"><i class="fa-solid fa-gauge-high"></i><span>Dash</span></a>
+    <a class="bottom-nav-item" data-view="income" onclick="navigate('income')"><i class="fa-solid fa-arrow-trend-up"></i><span>Income</span></a>
+    <button class="bottom-nav-add" onclick="openAddPicker()"><i class="fa-solid fa-plus"></i></button>
+    <a class="bottom-nav-item" data-view="expenses" onclick="navigate('expenses')"><i class="fa-solid fa-arrow-trend-down"></i><span>Expenses</span></a>
+    <a class="bottom-nav-item" data-view="clients" onclick="navigate('clients')"><i class="fa-solid fa-users"></i><span>Clients</span></a>
+  </nav>
+
+  <!-- OVERLAY -->
+  <div class="modal-overlay hidden" id="modalOverlay"></div>
+
+  <!-- PICKER SHEET (centered dialog) -->
+  <div class="sheet sheet-center hidden" id="sheetPicker">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">What would you like to add?</div>
+    <div class="picker-options">
+      <button class="picker-btn income-picker" onclick="openAddIncome()">
+        <div class="picker-icon"><i class="fa-solid fa-arrow-trend-up"></i></div>
+        <div><div class="picker-label">Income</div><div class="picker-desc">Record a payment received</div></div>
+      </button>
+      <button class="picker-btn expense-picker" onclick="openAddExpense()">
+        <div class="picker-icon"><i class="fa-solid fa-arrow-trend-down"></i></div>
+        <div><div class="picker-label">Expense</div><div class="picker-desc">Record a business expense</div></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- ADD INCOME SHEET -->
+  <div class="sheet sheet-wide hidden" id="sheetIncome">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <button class="sheet-back" onclick="backToPicker()"><i class="fa-solid fa-chevron-left"></i></button>
+      <div class="sheet-title">Add Income</div>
+      <button class="sheet-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="form-scroll">
+      <div class="form-group">
+        <label class="form-label">Client</label>
+        <div class="client-combo-wrapper">
+          <div class="client-dot-preview" id="clientDot"></div>
+          <input type="text" class="form-input client-combo-input" id="incomeClientSearch" placeholder="Type to search client…" oninput="filterClientDropdown()" onfocus="showClientDropdown()" autocomplete="off" />
+          <input type="hidden" id="incomeClientId" />
+          <div class="client-combo-dropdown hidden" id="clientDropdown"></div>
+        </div>
+      </div>
+      <div class="form-group hidden" id="subClientGroup">
+        <label class="form-label">Sub-Client</label>
+        <select class="form-select" id="incomeSubClient"><option value="">None / General</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Service</label>
+        <input type="text" class="form-input" id="incomeService" list="servicesList" placeholder="Type or select service…" autocomplete="off" />
+        <datalist id="servicesList">
+          <option>Social Media Management</option><option>Videography</option><option>Video Editing</option>
+          <option>Video + Editing Package</option><option>Shorts Editing</option><option>Photo + Video Content</option>
+          <option>Reels / Short Content</option><option>Story Management</option><option>Social Media Strategy</option>
+          <option>Full Agency Package</option>
+        </datalist>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Pricing Mode</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="qtyModeNo" onclick="setIncQtyMode(false)"><i class="fa-solid fa-euro-sign"></i> Direct Amount</button>
+          <button class="toggle-btn" id="qtyModeYes" onclick="setIncQtyMode(true)"><i class="fa-solid fa-hashtag"></i> Qty × Price</button>
+        </div>
+      </div>
+      <div class="form-group hidden" id="qtyPriceGroup">
+        <label class="form-label">Quantity × Unit Price</label>
+        <div class="qty-price-row">
+          <div class="qty-field">
+            <label class="qty-field-label">Qty</label>
+            <input type="number" class="form-input" id="incQty" placeholder="1" min="1" step="1" oninput="recalcQtyAmount()" />
+          </div>
+          <span class="qty-op">×</span>
+          <div class="qty-field" style="flex:2">
+            <label class="qty-field-label">Unit Price (€)</label>
+            <input type="number" class="form-input" id="incUnitPrice" placeholder="0.00" step="0.01" min="0" oninput="recalcQtyAmount()" />
+          </div>
+          <span class="qty-op">=</span>
+          <div class="qty-result" id="incQtyTotal">€0.00</div>
+        </div>
+      </div>
+      <div class="form-group" id="incAmountGroup">
+        <label class="form-label">Net Amount (€) <span class="optional">— VAT added on top for Invoice</span></label>
+        <div class="amount-input-wrapper">
+          <span class="currency-prefix">€</span>
+          <input type="number" class="form-input amount-input" id="incomeAmount" placeholder="0.00" step="0.01" min="0" oninput="updateVATPreview()" />
+        </div>
+      </div>
+      <div class="form-group" id="incPayTypeGroup">
+        <label class="form-label">Payment Type</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="toggleInvoice" onclick="setPaymentType('invoice')"><i class="fa-solid fa-file-invoice"></i> Invoice (24% VAT)</button>
+          <button class="toggle-btn" id="toggleCash" onclick="setPaymentType('cash')"><i class="fa-solid fa-money-bill-wave"></i> Cash (0% VAT)</button>
+        </div>
+        <div class="vat-preview" id="vatPreview">
+          <span id="vatPreviewText">VAT: €0.00</span>
+          <span id="vatGrossText" class="vat-gross">Client pays: €0.00</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Split Payment <span class="optional">— part Invoice, part Cash</span></label>
+        <div class="toggle-group">
+          <button class="toggle-btn" id="splitYes" onclick="setIncSplit(true)"><i class="fa-solid fa-scissors"></i> Split Invoice + Cash</button>
+          <button class="toggle-btn active" id="splitNo" onclick="setIncSplit(false)"><i class="fa-solid fa-xmark"></i> No Split</button>
+        </div>
+      </div>
+      <div class="form-group hidden" id="splitAmountsGroup">
+        <label class="form-label">Invoice Amount (€) <span class="optional">— +24% VAT on top</span></label>
+        <div class="amount-input-wrapper">
+          <span class="currency-prefix">€</span>
+          <input type="number" class="form-input amount-input" id="splitInvoiceAmt" placeholder="0.00" step="0.01" min="0" oninput="updateSplitPreview()" />
+        </div>
+        <label class="form-label" style="margin-top:12px">Cash Amount (€) <span class="optional">— no VAT</span></label>
+        <div class="amount-input-wrapper">
+          <span class="currency-prefix">€</span>
+          <input type="number" class="form-input amount-input" id="splitCashAmt" placeholder="0.00" step="0.01" min="0" oninput="updateSplitPreview()" />
+        </div>
+        <div class="vat-preview" id="splitVATPreview">
+          <span id="splitVATText">Invoice VAT: €0.00</span>
+          <span id="splitTotalText" class="vat-gross">Client pays total: €0.00</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <div class="date-mode-toggle">
+          <button class="date-mode-btn active" id="incDateModeExact" onclick="setIncomeDateMode('exact')"><i class="fa-solid fa-calendar-day"></i> Exact Date</button>
+          <button class="date-mode-btn" id="incDateModeMonth" onclick="setIncomeDateMode('month')"><i class="fa-solid fa-calendar"></i> Month Only</button>
+        </div>
+        <input type="date" class="form-input" id="incomeDate" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Recurring Income?</label>
+        <div class="toggle-group">
+          <button class="toggle-btn" id="incRecurringYes" onclick="setIncRecurring(true)"><i class="fa-solid fa-rotate"></i> Yes</button>
+          <button class="toggle-btn active" id="incRecurringNo" onclick="setIncRecurring(false)"><i class="fa-solid fa-xmark"></i> No</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <div class="status-toggle-group">
+          <button class="status-btn paid active" id="statusPaid" onclick="setStatus('Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>
+          <button class="status-btn pending" id="statusPending" onclick="setStatus('Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
+          <button class="status-btn overdue" id="statusOverdue" onclick="setStatus('Overdue')"><i class="fa-solid fa-triangle-exclamation"></i> Overdue</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes <span class="optional">(optional)</span></label>
+        <textarea class="form-textarea" id="incomeNotes" placeholder="Any additional notes…"></textarea>
+      </div>
+      <button class="btn-save" onclick="saveIncome()"><i class="fa-solid fa-check"></i> Save Income Entry</button>
+    </div>
+  </div>
+
+  <!-- ADD EXPENSE SHEET -->
+  <div class="sheet sheet-wide hidden" id="sheetExpense">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <button class="sheet-back" onclick="backToPicker()"><i class="fa-solid fa-chevron-left"></i></button>
+      <div class="sheet-title">Add Expense</div>
+      <button class="sheet-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="form-scroll">
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select class="form-select" id="expenseCategory">
+          <option value="">Select category…</option>
+          <option value="Rent">🏠 Rent</option><option value="Subscriptions">📱 Subscriptions</option>
+          <option value="Phone">📞 Phone</option><option value="Electricity">⚡ Electricity</option>
+          <option value="Gas">🔥 Gas</option><option value="Food & Entertainment">🍽️ Food &amp; Entertainment</option>
+          <option value="Equipment">🎥 Equipment</option><option value="Professional Services">💼 Professional Services</option>
+          <option value="Travel">✈️ Travel</option><option value="Investments">📈 Investments</option>
+          <option value="Social Insurance (EFKA)">🛡️ Social Insurance (EFKA)</option>
+          <option value="Gifts">🎁 Gifts</option><option value="Other Expenses">📦 Other Expenses</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Vendor / Supplier</label>
+        <input type="text" class="form-input" id="expenseVendor" placeholder="e.g. Adobe, Landlord, Vodafone…" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description <span class="optional">(optional)</span></label>
+        <input type="text" class="form-input" id="expenseDescription" placeholder="Brief description…" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total Amount Paid (€) <span class="optional">— VAT included if applicable</span></label>
+        <div class="amount-input-wrapper">
+          <span class="currency-prefix">€</span>
+          <input type="number" class="form-input amount-input" id="expenseAmount" placeholder="0.00" step="0.01" min="0" oninput="onExpAmountChange()" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Has VAT Receipt?</label>
+        <div class="toggle-group">
+          <button class="toggle-btn" id="expVATYes" onclick="setExpHasVAT(true)"><i class="fa-solid fa-receipt"></i> Yes — Auto-calculate</button>
+          <button class="toggle-btn active" id="expVATNo" onclick="setExpHasVAT(false)"><i class="fa-solid fa-xmark"></i> No VAT</button>
+        </div>
+        <div class="vat-preview hidden" id="expVATPreview">
+          <span id="expVATAmt">VAT (24%): €0.00</span>
+          <span class="vat-gross" id="expNetAmt">Net: €0.00</span>
+        </div>
+      </div>
+      <div class="form-group hidden" id="expVATManualGroup">
+        <label class="form-label">VAT Amount (€) <span class="optional">— auto-calculated, edit if different</span></label>
+        <div class="amount-input-wrapper">
+          <span class="currency-prefix">€</span>
+          <input type="number" class="form-input amount-input" id="expenseVAT" placeholder="0.00" step="0.01" min="0" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Payment Method</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="pmCard" onclick="setPaymentMethod('Credit Card')"><i class="fa-solid fa-credit-card"></i> Card</button>
+          <button class="toggle-btn" id="pmCash" onclick="setPaymentMethod('Cash')"><i class="fa-solid fa-money-bill-wave"></i> Cash</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Monthly Expense?</label>
+        <div class="toggle-group">
+          <button class="toggle-btn" id="recurringYes" onclick="setRecurring(true)"><i class="fa-solid fa-rotate"></i> Yes</button>
+          <button class="toggle-btn active" id="recurringNo" onclick="setRecurring(false)"><i class="fa-solid fa-xmark"></i> No</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <div class="date-mode-toggle">
+          <button class="date-mode-btn active" id="expDateModeExact" onclick="setExpDateMode('exact')"><i class="fa-solid fa-calendar-day"></i> Exact Date</button>
+          <button class="date-mode-btn" id="expDateModeMonth" onclick="setExpDateMode('month')"><i class="fa-solid fa-calendar"></i> Month Only</button>
+        </div>
+        <input type="date" class="form-input" id="expenseDate" />
+      </div>
+      <button class="btn-save btn-save-expense" onclick="saveExpense()"><i class="fa-solid fa-check"></i> Save Expense Entry</button>
+    </div>
+  </div>
+
+  <!-- CLIENT DETAIL SHEET -->
+  <div class="sheet sheet-wide hidden" id="sheetClientDetail">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <button class="sheet-back" onclick="closeSheet('sheetClientDetail')"><i class="fa-solid fa-chevron-left"></i></button>
+      <div class="sheet-title" id="clientDetailTitle">Client Detail</div>
+      <button class="sheet-back" id="clientDetailEditBtn" title="Edit client" style="background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.2);color:#fff"><i class="fa-solid fa-pen"></i></button>
+      <button class="sheet-close" onclick="closeSheet('sheetClientDetail')"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="form-scroll" id="clientDetailContent"></div>
+  </div>
+
+  <!-- EDIT CLIENT SHEET -->
+  <div class="sheet sheet-wide hidden" id="sheetEditClient">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <button class="sheet-back" onclick="closeSheet('sheetEditClient')"><i class="fa-solid fa-chevron-left"></i></button>
+      <div class="sheet-title">Edit Client</div>
+      <button class="sheet-close" onclick="closeSheet('sheetEditClient')"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="form-scroll">
+      <input type="hidden" id="editClientId" />
+      <input type="hidden" id="editClientImgData" />
+      <label class="client-img-upload-row" onclick="document.getElementById('editClientImgFile').click()">
+        <div class="client-img-preview" id="editClientImgPreview"><i class="fa-solid fa-camera"></i></div>
+        <div class="client-img-label">
+          <strong>Profile Photo</strong>
+          <span>Tap to upload image (optional)</span>
+        </div>
+      </label>
+      <input type="file" id="editClientImgFile" accept="image/*" style="display:none" onchange="handleClientImageUpload(this)" />
+      <div class="form-group">
+        <label class="form-label">Client Name</label>
+        <input type="text" class="form-input" id="editClientName" placeholder="Client name…" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="editTypeDirect" onclick="setEditClientType('Direct')"><i class="fa-solid fa-user"></i> Direct Client</button>
+          <button class="toggle-btn" id="editTypeAgency" onclick="setEditClientType('Agency')"><i class="fa-solid fa-building"></i> Agency</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Color</label>
+        <div class="color-swatches" id="editColorSwatches"></div>
+      </div>
+      <div class="form-group" id="editSubclientGroup">
+        <label class="form-label">Sub-Clients</label>
+        <div class="subclient-edit-list" id="editSubclientList"></div>
+        <div class="subclient-add-row">
+          <input type="text" class="form-input" id="newSubclientInput" placeholder="Add sub-client name and press Enter…" onkeydown="if(event.key==='Enter'){event.preventDefault();addSubclientToEdit();}" />
+          <button class="btn-add-sub" onclick="addSubclientToEdit()"><i class="fa-solid fa-plus"></i> Add</button>
+        </div>
+      </div>
+      <button class="btn-save" onclick="saveClientEdit()" style="margin-bottom:10px"><i class="fa-solid fa-check"></i> Save Changes</button>
+      <button class="btn-delete-client" onclick="deleteClientFromEdit()"><i class="fa-solid fa-trash"></i> Delete This Client</button>
+    </div>
+  </div>
+
+  <!-- ADD CLIENT SHEET -->
+  <div class="sheet sheet-wide hidden" id="sheetAddClient">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <button class="sheet-back" onclick="closeAllModals()"><i class="fa-solid fa-chevron-left"></i></button>
+      <div class="sheet-title">Add New Client</div>
+      <button class="sheet-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="form-scroll">
+      <input type="hidden" id="addClientImgData" />
+      <label class="client-img-upload-row" onclick="document.getElementById('addClientImgFile').click()">
+        <div class="client-img-preview" id="addClientImgPreview"><i class="fa-solid fa-camera"></i></div>
+        <div class="client-img-label">
+          <strong>Profile Photo</strong>
+          <span>Tap to upload image (optional)</span>
+        </div>
+      </label>
+      <input type="file" id="addClientImgFile" accept="image/*" style="display:none" onchange="handleClientImageUpload(this)" />
+      <div class="form-group">
+        <label class="form-label">Client Name</label>
+        <input type="text" class="form-input" id="addClientName" placeholder="Client name…" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="addTypeDirect" onclick="setAddClientType('Direct')"><i class="fa-solid fa-user"></i> Direct Client</button>
+          <button class="toggle-btn" id="addTypeAgency" onclick="setAddClientType('Agency')"><i class="fa-solid fa-building"></i> Agency (has sub-clients)</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Color</label>
+        <div class="color-swatches" id="addColorSwatches"></div>
+      </div>
+      <button class="btn-save" onclick="saveNewClient()"><i class="fa-solid fa-check"></i> Add Client</button>
+    </div>
+  </div>
+
+  <button class="fab" onclick="openAddPicker()"><i class="fa-solid fa-plus"></i></button>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
