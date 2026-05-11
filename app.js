@@ -1071,6 +1071,7 @@ function renderQEIncome(cont) {
     qeGridSelectedClients = state.clients.slice(0, 6).map(c=>c.id);
 
   const selCols = state.clients.filter(c=>qeGridSelectedClients.includes(c.id));
+
   const moOpts = (()=>{
     const ms = allMonths();
     if (!ms.includes(qeGridMonth)) ms.unshift(qeGridMonth);
@@ -1085,47 +1086,51 @@ function renderQEIncome(cont) {
       <span>${c.name}</span>
     </label>`).join('');
 
-  // Header row 1: client names spanning their sub-columns
-  const hRow1 = selCols.map(c=>{
-    const hasSub = (c.subclients||[]).length > 0;
-    return '<th colspan="'+(hasSub?5:4)+'" class="qe-th-client" style="border-top:3px solid '+c.color+'">'+c.name+'</th>';
-  }).join('');
+  // For each client: agency gets one column per subclient (qty) + Price + Total
+  //                  direct gets Qty + Price + Total
+  const clientColCount = c => (c.subclients||[]).length > 0 ? (c.subclients.length + 2) : 3;
 
-  // Header row 2: sub-column labels per client
+  // Header row 1: Day | Note | [ClientName spanning N cols] | Day Total
+  const hRow1 = selCols.map(c=>'<th colspan="'+clientColCount(c)+'" class="qe-th-client" style="border-top:3px solid '+c.color+'">'+c.name+'</th>').join('');
+
+  // Header row 2: per client sub-headers
   const hRow2 = selCols.map(c=>{
-    const hasSub = (c.subclients||[]).length > 0;
-    return (hasSub ? '<th class="qe-sh">Subclient</th>' : '')
-      +'<th class="qe-sh">Qty</th><th class="qe-sh">Price</th><th class="qe-sh">Note</th><th class="qe-sh qe-sh-total">Total</th>';
+    const subs = c.subclients||[];
+    if (subs.length > 0) {
+      return subs.map(s=>'<th class="qe-sh">'+s+'</th>').join('')+'<th class="qe-sh qe-sh-price">€/unit</th><th class="qe-sh qe-sh-total">Total</th>';
+    }
+    return '<th class="qe-sh">Qty</th><th class="qe-sh qe-sh-price">Price</th><th class="qe-sh qe-sh-total">Total</th>';
   }).join('');
 
   // Body rows
   const bodyRows = Array.from({length:daysInMonth},(_,i)=>{
     const day = i+1;
-    const dateStr = qeGridMonth+'-'+String(day).padStart(2,'0');
-    const isToday = dateStr===today;
-    const cells = selCols.map(c=>{
-      const hasSub = (c.subclients||[]).length > 0;
-      const subOpts = (c.subclients||[]).map(s=>'<option value="'+s+'">'+s+'</option>').join('');
-      const subCell = hasSub
-        ? '<td class="qe-td-sub"><select class="qe-sp-sub" data-client="'+c.id+'" data-date="'+dateStr+'" data-type="sub"><option value="">—</option>'+subOpts+'</select></td>'
-        : '';
-      return subCell
-        +'<td class="qe-td-n"><input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+dateStr+'" data-type="qty" oninput="updateQECellTotal(this)" /></td>'
-        +'<td class="qe-td-n"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+dateStr+'" data-type="price" oninput="updateQECellTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
-        +'<td class="qe-td-note"><input class="qe-sp-inp qe-sp-note-inp" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+dateStr+'" data-type="note" /></td>'
-        +'<td class="qe-cell-total" data-client="'+c.id+'" data-date="'+dateStr+'" data-value="0">—</td>';
+    const ds = qeGridMonth+'-'+String(day).padStart(2,'0');
+    const isToday = ds===today;
+    const clientCells = selCols.map(c=>{
+      const subs = c.subclients||[];
+      if (subs.length > 0) {
+        // Agency: one qty input per subclient + price + total
+        const subCells = subs.map(s=>'<td class="qe-td-n"><input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+ds+'" data-sub="'+s+'" data-type="subqty" oninput="updateQEClientTotal(this)" /></td>').join('');
+        return subCells
+          +'<td class="qe-td-n"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
+          +'<td class="qe-client-total" data-client="'+c.id+'" data-date="'+ds+'" data-value="0">—</td>';
+      } else {
+        // Direct: qty + price + total
+        return '<td class="qe-td-n"><input class="qe-sp-inp qe-sp-qty" type="number" placeholder="—" min="0" step="1" data-client="'+c.id+'" data-date="'+ds+'" data-type="qty" oninput="updateQEClientTotal(this)" /></td>'
+          +'<td class="qe-td-n"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
+          +'<td class="qe-client-total" data-client="'+c.id+'" data-date="'+ds+'" data-value="0">—</td>';
+      }
     }).join('');
-    return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+dateStr+'">'
+    return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+ds+'">'
       +'<td class="qe-td-day'+(isToday?' qe-today-day':'')+'">'+day+'</td>'
-      +cells
-      +'<td class="qe-td-total" data-date="'+dateStr+'">—</td></tr>';
+      +'<td class="qe-td-note-cell"><input class="qe-sp-inp qe-sp-note-inp" type="text" placeholder="note…" data-date="'+ds+'" data-type="note" /></td>'
+      +clientCells
+      +'<td class="qe-td-total" data-date="'+ds+'">—</td></tr>';
   }).join('');
 
-  // Footer totals
-  const footCells = selCols.map(c=>{
-    const hasSub = (c.subclients||[]).length > 0;
-    return '<td colspan="'+(hasSub?5:4)+'" class="qe-tf-coltotal" data-client="'+c.id+'">—</td>';
-  }).join('');
+  // Footer
+  const footCells = selCols.map(c=>'<td colspan="'+clientColCount(c)+'" class="qe-tf-coltotal" data-client="'+c.id+'">—</td>').join('');
 
   cont.innerHTML = `
     <div class="qe-grid-controls">
@@ -1161,12 +1166,20 @@ function renderQEIncome(cont) {
     <div class="qe-spreadsheet-wrapper">
       <table class="qe-spreadsheet" id="qeSpreadsheet">
         <thead>
-          <tr><th class="qe-th-day" rowspan="2">Day</th>${hRow1}<th class="qe-th-total" rowspan="2">Day Total</th></tr>
+          <tr>
+            <th class="qe-th-day" rowspan="2">Day</th>
+            <th class="qe-sh" rowspan="2" style="min-width:90px">Note</th>
+            ${hRow1}
+            <th class="qe-th-total" rowspan="2">Day Total</th>
+          </tr>
           <tr>${hRow2}</tr>
         </thead>
         <tbody>${bodyRows}</tbody>
         <tfoot><tr class="qe-sp-tfoot">
-          <td class="qe-tf-label">TOTAL</td>${footCells}<td class="qe-tf-grand">—</td>
+          <td class="qe-tf-label">TOTAL</td>
+          <td></td>
+          ${footCells}
+          <td class="qe-tf-grand">—</td>
         </tr></tfoot>
       </table>
     </div>
@@ -1174,19 +1187,26 @@ function renderQEIncome(cont) {
   `;
 }
 
-function updateQECellTotal(inp) {
+function updateQEClientTotal(inp) {
   const cid = inp.dataset.client;
   const tr = inp.closest('tr');
-  const qty   = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value)   || 0;
   const price = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="price"]')?.value) || 0;
-  const total = price > 0 ? Math.round((qty > 0 ? qty * price : price) * 100) / 100 : 0;
-  const totalCell = tr.querySelector('.qe-cell-total[data-client="'+cid+'"]');
-  if (totalCell) { totalCell.textContent = total > 0 ? fmt(total) : '—'; totalCell.dataset.value = total; }
-  // Row total
-  let rowTotal = 0;
-  tr.querySelectorAll('.qe-cell-total').forEach(c=>{ rowTotal += parseFloat(c.dataset.value)||0; });
-  const rtd = tr.querySelector('.qe-td-total');
-  if (rtd) rtd.textContent = rowTotal > 0 ? fmt(rowTotal) : '—';
+  // Sum quantities: subclients or direct qty
+  let totalQty = 0;
+  const subqtys = tr.querySelectorAll('[data-client="'+cid+'"][data-type="subqty"]');
+  if (subqtys.length > 0) {
+    subqtys.forEach(el=>{ totalQty += parseFloat(el.value)||0; });
+  } else {
+    totalQty = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value) || 0;
+  }
+  const clientTotal = (price > 0 && totalQty > 0) ? Math.round(totalQty * price * 100) / 100 : 0;
+  const ct = tr.querySelector('.qe-client-total[data-client="'+cid+'"]');
+  if (ct) { ct.textContent = clientTotal > 0 ? fmt(clientTotal) : '—'; ct.dataset.value = clientTotal; }
+  // Day total
+  let dayTotal = 0;
+  tr.querySelectorAll('.qe-client-total').forEach(c=>{ dayTotal += parseFloat(c.dataset.value)||0; });
+  const dt = tr.querySelector('.qe-td-total');
+  if (dt) dt.textContent = dayTotal > 0 ? fmt(dayTotal) : '—';
   updateQEColTotals();
 }
 
@@ -1197,7 +1217,7 @@ function updateQEColTotals() {
   table.querySelectorAll('.qe-tf-coltotal').forEach(foot=>{
     const cid = foot.dataset.client;
     let col = 0;
-    table.querySelectorAll('.qe-cell-total[data-client="'+cid+'"]').forEach(c=>{ col += parseFloat(c.dataset.value)||0; });
+    table.querySelectorAll('.qe-client-total[data-client="'+cid+'"]').forEach(c=>{ col += parseFloat(c.dataset.value)||0; });
     foot.textContent = col > 0 ? fmt(col) : '—';
     grand += col;
   });
@@ -1212,7 +1232,7 @@ function qeSpreadsheetNav(e, inp) {
     const type = inp.dataset.type;
     const tbody = inp.closest('tbody');
     const same = Array.from(tbody.querySelectorAll('[data-client="'+cid+'"][data-type="'+type+'"]'));
-    const next = same[same.indexOf(inp) + 1];
+    const next = same[same.indexOf(inp)+1];
     if (next) { next.focus(); next.select(); }
   }
 }
@@ -1227,32 +1247,45 @@ function saveQEGrid() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
   const newEntries = [];
-  table.querySelectorAll('[data-type="price"]').forEach(priceInp=>{
-    const price = parseFloat(priceInp.value) || 0;
-    if (price <= 0) return;
-    const cid = priceInp.dataset.client;
-    const dateStr = priceInp.dataset.date;
-    const tr = priceInp.closest('tr');
-    const qty       = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value) || 1;
-    const note      = tr.querySelector('[data-client="'+cid+'"][data-type="note"]')?.value.trim() || '';
-    const subClient = tr.querySelector('[data-client="'+cid+'"][data-type="sub"]')?.value || '';
-    const amount    = Math.round(qty * price * 100) / 100;
-    const service   = (qeGridService||'Video Editing').trim();
-    const entry = { id:genId(), clientId:cid, subClient, service, amount,
-      vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
-      paymentType:qeGridPayType, date:dateStr, status:qeGridStatus,
-      notes:note, createdAt:Date.now() };
-    state.income.push(entry);
-    newEntries.push(entry);
+  table.querySelectorAll('tbody tr').forEach(tr=>{
+    const dateStr = tr.dataset.date;
+    const note = tr.querySelector('[data-type="note"]')?.value.trim() || '';
+    const done = new Set();
+    tr.querySelectorAll('[data-type="price"]').forEach(priceInp=>{
+      const cid = priceInp.dataset.client;
+      if (done.has(cid)) return; done.add(cid);
+      const price = parseFloat(priceInp.value) || 0;
+      if (price <= 0) return;
+      const service = (qeGridService||'Video Editing').trim();
+      const subqtys = tr.querySelectorAll('[data-client="'+cid+'"][data-type="subqty"]');
+      if (subqtys.length > 0) {
+        subqtys.forEach(sq=>{
+          const qty = parseFloat(sq.value) || 0;
+          if (qty <= 0) return;
+          const amount = Math.round(qty * price * 100) / 100;
+          const entry = { id:genId(), clientId:cid, subClient:sq.dataset.sub||'', service, amount,
+            vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
+            paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:note, createdAt:Date.now() };
+          state.income.push(entry); newEntries.push(entry);
+        });
+      } else {
+        const qty = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value) || 0;
+        if (qty <= 0) return;
+        const amount = Math.round(qty * price * 100) / 100;
+        const entry = { id:genId(), clientId:cid, subClient:'', service, amount,
+          vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
+          paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:note, createdAt:Date.now() };
+        state.income.push(entry); newEntries.push(entry);
+      }
+    });
   });
   if (!newEntries.length) { showToast('No entries to save','error'); return; }
   saveData();
   newEntries.forEach(e=>sheetsAdd('income',e));
   const total = newEntries.reduce((s,e)=>s+e.amount,0);
   showToast(newEntries.length+' entries saved — '+fmt(total));
-  table.querySelectorAll('[data-type="qty"],[data-type="price"],[data-type="note"]').forEach(inp=>inp.value='');
-  table.querySelectorAll('[data-type="sub"]').forEach(sel=>sel.selectedIndex=0);
-  table.querySelectorAll('.qe-cell-total').forEach(c=>{c.textContent='—';c.dataset.value='0';});
+  table.querySelectorAll('[data-type="subqty"],[data-type="qty"],[data-type="price"],[data-type="note"]').forEach(inp=>inp.value='');
+  table.querySelectorAll('.qe-client-total').forEach(c=>{c.textContent='—';c.dataset.value='0';});
   table.querySelectorAll('.qe-td-total').forEach(c=>c.textContent='—');
   updateQEColTotals();
 }

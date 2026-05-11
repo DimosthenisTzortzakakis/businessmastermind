@@ -2196,6 +2196,13 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .qe-td-n { padding: 2px; }
 .qe-td-note { padding: 2px; }
 .qe-td-sub { padding: 2px; }
+.qe-td-note-cell { padding: 2px; }
+.qe-sh-price { color: var(--amber) !important; }
+.qe-client-total {
+  font-weight: 700; color: var(--green); font-size: 12px;
+  text-align: center; padding: 5px 8px; white-space: nowrap;
+  background: rgba(34,197,94,0.06);
+}
 .qe-sh {
   font-size: 10px; font-weight: 600; color: var(--text-muted);
   padding: 4px 6px; background: var(--bg-sidebar); text-align: center;
