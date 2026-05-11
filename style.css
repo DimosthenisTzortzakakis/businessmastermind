@@ -2192,30 +2192,42 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   font-weight: 900;
 }
 .qe-today-row { background: rgba(99,102,241,0.04); }
-.qe-td-cell { padding: 3px; display: flex; flex-direction: column; gap: 3px; }
-.qe-sp-sub {
-  width: 80px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 5px;
-  padding: 2px 4px;
-  color: var(--text-muted);
-  font-size: 10px;
-  cursor: pointer;
+.qe-td-cell { padding: 2px; }
+.qe-td-n { padding: 2px; }
+.qe-td-note { padding: 2px; }
+.qe-td-sub { padding: 2px; }
+.qe-sh {
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  padding: 4px 6px; background: var(--bg-sidebar); text-align: center;
 }
-.qe-sp-sub:focus { outline: none; border-color: var(--accent); }
-.qe-sp-note {
-  width: 80px;
-  background: transparent;
+.qe-sh-total { color: var(--green); }
+.qe-sp-inp {
+  background: rgba(255,255,255,0.04);
   border: 1px solid transparent;
   border-radius: 5px;
-  padding: 2px 4px;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-style: italic;
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  display: block;
 }
-.qe-sp-note:focus { outline: none; border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.04); }
-.qe-sp-note::placeholder { color: rgba(255,255,255,0.2); }
+.qe-sp-qty   { width: 48px; padding: 5px 4px; }
+.qe-sp-price { width: 60px; padding: 5px 4px; }
+.qe-sp-note-inp { width: 80px; padding: 5px 4px; text-align: left; font-style: italic; color: var(--text-muted); }
+.qe-sp-inp:focus { outline: none; border-color: var(--accent); background: rgba(99,102,241,0.12); }
+.qe-sp-inp:not(:placeholder-shown) { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.35); color: #a5b4fc; font-weight: 700; }
+.qe-sp-sub {
+  width: 90px; padding: 5px 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid transparent; border-radius: 5px;
+  color: var(--text-muted); font-size: 11px; cursor: pointer; display: block;
+}
+.qe-sp-sub:focus { outline: none; border-color: var(--accent); }
+.qe-cell-total {
+  font-weight: 700; color: var(--green); font-size: 12px;
+  text-align: center; padding: 5px 8px; white-space: nowrap;
+  background: rgba(34,197,94,0.06);
+}
 .qe-sp-cell {
   width: 80px;
   background: rgba(255,255,255,0.04);
