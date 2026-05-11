@@ -1081,27 +1081,108 @@ function captureQEGridData() {
   });
 }
 
+/* Load permanent income entries for the current month+service into the grid */
+function loadQEFromState(table) {
+  if (!table) return;
+  const service = (qeGridService||'').trim();
+  // Get entries for this month (filter by service if set, else show all)
+  const monthEntries = state.income.filter(e =>
+    e.date && e.date.startsWith(qeGridMonth) && (!service || e.service === service)
+  );
+  if (!monthEntries.length) return;
+
+  table.querySelectorAll('tbody tr[data-date]').forEach(tr => {
+    const dateStr = tr.dataset.date;
+    const dayEntries = monthEntries.filter(e => e.date === dateStr);
+    if (!dayEntries.length) return;
+
+    // Group by clientId
+    const byClient = {};
+    dayEntries.forEach(e => { (byClient[e.clientId] = byClient[e.clientId]||[]).push(e); });
+
+    Object.entries(byClient).forEach(([cid, entries]) => {
+      const hasSubclients = entries.some(e => e.subClient);
+
+      if (hasSubclients) {
+        // Agency: find shared price from saved entries, set it; then per-subclient qty + override
+        const withShared = entries.filter(e => e.sharedPrice != null);
+        const sharedPrice = withShared.length ? withShared[withShared.length-1].sharedPrice : 0;
+        const sharedInp = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
+        if (sharedInp) sharedInp.value = sharedPrice || '';
+
+        entries.filter(e => e.subClient).forEach(entry => {
+          const sub = entry.subClient;
+          const subqtyInp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subqty"]');
+          if (subqtyInp) {
+            if (entry.qty != null) {
+              subqtyInp.value = entry.qty;
+            } else if (entry.unitPrice && entry.amount) {
+              subqtyInp.value = Math.round(entry.amount / entry.unitPrice * 100) / 100;
+            }
+          }
+          // Subprice override: only if different from shared
+          if (entry.unitPrice != null && entry.unitPrice !== sharedPrice) {
+            const subpriceInp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subprice"]');
+            if (subpriceInp) subpriceInp.value = entry.unitPrice;
+          }
+          if (entry.notes) {
+            const ni = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subnote"]');
+            if (ni) { ni.value = entry.notes; ni.style.display='block'; const p=ni.previousElementSibling; if(p?.classList.contains('qe-note-pen')) p.style.display='none'; }
+          }
+        });
+
+      } else {
+        // Direct client — use last/most-recent entry
+        const entry = entries[entries.length-1];
+        if (entry.qty != null) {
+          const qi = tr.querySelector('[data-client="'+cid+'"][data-type="qty"]');
+          if (qi) qi.value = entry.qty;
+        }
+        if (entry.unitPrice != null) {
+          const pi = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
+          if (pi) pi.value = entry.unitPrice;
+        }
+        // If no qty/unitPrice stored, put amount directly in the total cell
+        if (entry.qty == null && entry.amount) {
+          const tc = tr.querySelector('.qe-client-total[data-client="'+cid+'"]');
+          if (tc) { tc.textContent = fmt(entry.amount); tc.dataset.value = entry.amount; }
+        }
+        if (entry.notes) {
+          const ni = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
+          if (ni) { ni.value = entry.notes; ni.style.display='block'; const p=ni.previousElementSibling; if(p?.classList.contains('qe-note-pen')) p.style.display='none'; }
+        }
+      }
+    });
+  });
+}
+
 function restoreQEGridData() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
+
+  // Layer 1: permanent saved data
+  loadQEFromState(table);
+
+  // Layer 2: overlay in-session edits (higher priority — includes cleared values)
   table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
     const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-    const val = qeGridData[key];
-    if (val !== undefined) inp.value = val;
-    if (inp.dataset.type === 'subnote') {
-      const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-      if (qeGridData[visKey]) {
-        inp.style.display = 'block';
+    if (key in qeGridData) {
+      inp.value = qeGridData[key];
+      if (inp.dataset.type === 'subnote') {
+        const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+        const visible = visKey in qeGridData ? !!qeGridData[visKey] : (inp.value !== '');
+        inp.style.display = (visible && inp.value) ? 'block' : 'none';
         const pen = inp.previousElementSibling;
-        if (pen?.classList.contains('qe-note-pen')) pen.style.display = 'none';
+        if (pen?.classList.contains('qe-note-pen')) pen.style.display = inp.style.display==='block' ? 'none' : '';
       }
     }
   });
-  // Recalculate all totals
+
+  // Recalculate all totals once
   const seen = new Set();
   table.querySelectorAll('[data-type="subqty"],[data-type="qty"]').forEach(inp => {
     const k = inp.dataset.client+'|'+inp.dataset.date;
-    if (!seen.has(k) && (parseFloat(inp.value) > 0)) { seen.add(k); updateQEClientTotal(inp); }
+    if (!seen.has(k)) { seen.add(k); updateQEClientTotal(inp); }
   });
   updateQEColTotals();
 }
@@ -1209,7 +1290,7 @@ function renderQEIncome(cont) {
         </div>
         <div class="qe-ctrl-field" style="flex:2">
           <label class="qe-ctrl-label">Service</label>
-          <input type="text" class="form-input" style="padding:7px 10px;font-size:13px" value="${qeGridService}" list="servicesList" placeholder="e.g. Video Editing" oninput="qeGridService=this.value" />
+          <input type="text" class="form-input" style="padding:7px 10px;font-size:13px" value="${qeGridService}" list="servicesList" placeholder="e.g. Video Editing" oninput="qeGridService=this.value" onchange="renderQEIncome(document.getElementById('qeContent'))" />
         </div>
         <div class="qe-ctrl-field">
           <label class="qe-ctrl-label">Type</label>
@@ -1364,9 +1445,9 @@ function saveQEGrid() {
           // Upsert: update existing entry or create new
           const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||'') && e.service===service);
           if (xi >= 0) {
-            state.income[xi] = { ...state.income[xi], amount, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
+            state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
           } else {
-            const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount,
+            const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice, sharedPrice:price,
               vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
               paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
             state.income.push(entry); sheetsAdd('income',entry);
@@ -1382,9 +1463,9 @@ function saveQEGrid() {
         if (amount <= 0) return;
         const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')=== '' && e.service===service);
         if (xi >= 0) {
-          state.income[xi] = { ...state.income[xi], amount, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
+          state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:price, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
         } else {
-          const entry = { id:genId(), clientId:cid, subClient:'', service, amount,
+          const entry = { id:genId(), clientId:cid, subClient:'', service, amount, qty, unitPrice:price,
             vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
             paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
           state.income.push(entry); sheetsAdd('income',entry);
