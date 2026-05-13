@@ -2965,14 +2965,6 @@ function init() {
     }
   });
 
-  if (syncEnabled()) {
-    setSyncStatus('idle');
-    const isBtn = document.getElementById('instantSyncBtn');
-    const asBtn = document.getElementById('autoSyncBtn');
-    if (isBtn) isBtn.style.display = 'flex';
-    if (asBtn) asBtn.style.display = 'flex';
-  }
-
   startAutoSync();
   navigate('dashboard');
 }

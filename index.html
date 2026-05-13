@@ -38,8 +38,6 @@
     </nav>
     <div class="sidebar-footer">
       <button class="btn-sidebar-action" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate Recurring</button>
-      <button class="btn-sidebar-action" id="instantSyncBtn" style="display:none" onclick="instantSync()"><i class="fa-solid fa-rotate"></i> Instant Sync</button>
-      <button class="btn-sidebar-action" id="autoSyncBtn"   style="display:none" onclick="toggleAutoSync()"><i class="fa-solid fa-clock-rotate-left"></i> Auto Sync: OFF</button>
       <button class="btn-sidebar-action btn-cloud-sync" onclick="openSyncModal()"><i class="fa-solid fa-cloud"></i> Cloud Sync <span class="cloud-sync-dot cs-idle" id="cloudSyncDot"></span></button>
       <button class="btn-sidebar-action" onclick="exportData()"><i class="fa-solid fa-download"></i> Export JSON</button>
       <button class="btn-sidebar-action" onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-upload"></i> Import JSON</button>
@@ -57,9 +55,6 @@
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
           <input type="text" class="search-input" id="globalSearch" placeholder="Search clients, services, amounts…" oninput="onSearchInput()" autocomplete="off" />
           <button class="search-clear hidden" id="searchClear" onclick="clearSearch()"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-        <div class="sync-badge hidden" id="syncBadge" onclick="sheetsSync()" title="Click to sync">
-          <span class="sync-icon">☁</span><span>Google Sheets</span>
         </div>
         <button class="btn-add-desktop" onclick="openAddPicker()"><i class="fa-solid fa-plus"></i> Add Entry</button>
       </div>
