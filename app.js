@@ -366,11 +366,7 @@ function renderSearchResults() {
 function navigate(view) {
   currentView = view;
   clearSearch();
-  // Close mobile sidebar if open
-  const sidebar = document.querySelector('.sidebar');
-  const overlay = document.querySelector('.sidebar-overlay');
-  if (sidebar) { sidebar.setAttribute('data-open','0'); sidebar.style.cssText='display:none'; }
-  if (overlay) overlay.style.display='none';
+  closeMobileSidebar();
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.bottom-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.view').forEach(el=>el.classList.add('hidden'));
@@ -1429,20 +1425,20 @@ function qeSubNoteBlur(inp) {
   }
 }
 
-function toggleSidebar() {
+function closeMobileSidebar() {
+  if (window.innerWidth > 768) return;
   const sidebar = document.querySelector('.sidebar');
   const overlay = document.querySelector('.sidebar-overlay');
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function toggleSidebar() {
   if (window.innerWidth <= 768) {
-    const isOpen = sidebar.getAttribute('data-open') === '1';
-    if (isOpen) {
-      sidebar.setAttribute('data-open','0');
-      sidebar.style.cssText = 'display:none';
-      if (overlay) overlay.style.display = 'none';
-    } else {
-      sidebar.setAttribute('data-open','1');
-      sidebar.style.cssText = 'display:flex;position:fixed;top:0;left:0;bottom:0;z-index:200;width:240px;flex-direction:column;box-shadow:4px 0 32px rgba(0,0,0,0.6)';
-      if (overlay) overlay.style.display = 'block';
-    }
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.querySelector('.sidebar-overlay');
+    const isOpen = sidebar.classList.toggle('mobile-open');
+    if (overlay) overlay.style.display = isOpen ? 'block' : 'none';
   } else {
     document.body.classList.toggle('sidebar-hidden');
   }
