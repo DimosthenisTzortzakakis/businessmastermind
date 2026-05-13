@@ -366,7 +366,11 @@ function renderSearchResults() {
 function navigate(view) {
   currentView = view;
   clearSearch();
-  document.body.classList.remove('sidebar-mobile-open');
+  // Close mobile sidebar if open
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.querySelector('.sidebar-overlay');
+  if (sidebar) { sidebar.setAttribute('data-open','0'); sidebar.style.cssText='display:none'; }
+  if (overlay) overlay.style.display='none';
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.bottom-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.view').forEach(el=>el.classList.add('hidden'));
@@ -1426,8 +1430,19 @@ function qeSubNoteBlur(inp) {
 }
 
 function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.querySelector('.sidebar-overlay');
   if (window.innerWidth <= 768) {
-    document.body.classList.toggle('sidebar-mobile-open');
+    const isOpen = sidebar.getAttribute('data-open') === '1';
+    if (isOpen) {
+      sidebar.setAttribute('data-open','0');
+      sidebar.style.cssText = 'display:none';
+      if (overlay) overlay.style.display = 'none';
+    } else {
+      sidebar.setAttribute('data-open','1');
+      sidebar.style.cssText = 'display:flex;position:fixed;top:0;left:0;bottom:0;z-index:200;width:240px;flex-direction:column;box-shadow:4px 0 32px rgba(0,0,0,0.6)';
+      if (overlay) overlay.style.display = 'block';
+    }
   } else {
     document.body.classList.toggle('sidebar-hidden');
   }
