@@ -3,8 +3,10 @@
 // ── Google Sheets Config ───────────────────────────────────────
 let SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwpnWWC_FLbbSj5WU5pVOT5-62VRt0YNjzlNhTwGgDu9JmNdHLD9o5gYX8Zvje1fY3X/exec';
 
-const STORAGE_KEY = 'biz_mastermind_data';
-const VAT_RATE    = 0.24;
+const STORAGE_KEY    = 'biz_mastermind_data';
+const QE_GRID_KEY    = 'biz_qe_grid';
+const QE_EXP_KEY     = 'biz_qe_exp';
+const VAT_RATE       = 0.24;
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -131,6 +133,15 @@ function loadData() {
       state.services = [...DEFAULT_SERVICES];
     }
   } catch(e) { state.clients = DEFAULT_CLIENTS; state.services = [...DEFAULT_SERVICES]; }
+  // Restore unsaved QE grid drafts
+  try {
+    const qg = localStorage.getItem(QE_GRID_KEY);
+    if (qg) qeGridData = JSON.parse(qg);
+  } catch(e) {}
+  try {
+    const qe = localStorage.getItem(QE_EXP_KEY);
+    if (qe) qeExpenseGridData = JSON.parse(qe);
+  } catch(e) {}
 }
 
 function saveData() {
@@ -1097,6 +1108,8 @@ function captureQEGridData() {
         (inp.style.display !== 'none' && inp.style.display !== '') ? '1' : '';
     }
   });
+  // Persist draft to localStorage so it survives refresh
+  try { localStorage.setItem(QE_GRID_KEY, JSON.stringify(qeGridData)); } catch(e) {}
 }
 
 /* Load permanent income entries for the current month+service into the grid */
@@ -1354,6 +1367,8 @@ function renderQEIncome(cont) {
 }
 
 function updateQEClientTotal(inp) {
+  // Auto-save draft so values survive a refresh
+  captureQEGridData();
   const cid = inp.dataset.client;
   const tr = inp.closest('tr');
   const sharedPrice = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="price"]')?.value) || 0;
@@ -1553,6 +1568,8 @@ function captureQEExpGridData() {
   Object.keys(qeExpenseGridData).forEach(ds=>{
     if ((qeExpenseGridData[ds]||[]).every(s=>!s.category&&!s.amount&&!s.note)) delete qeExpenseGridData[ds];
   });
+  // Persist draft to localStorage so it survives refresh
+  try { localStorage.setItem(QE_EXP_KEY, JSON.stringify(qeExpenseGridData)); } catch(e) {}
 }
 
 function initQEExpFromState() {
