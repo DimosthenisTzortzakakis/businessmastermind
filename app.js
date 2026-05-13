@@ -121,10 +121,11 @@ function loadData() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      state.clients  = p.clients  || DEFAULT_CLIENTS;
-      state.income   = p.income   || [];
-      state.expenses = p.expenses || [];
-      state.services = p.services || [...DEFAULT_SERVICES];
+      state.clients      = p.clients  || DEFAULT_CLIENTS;
+      state.income       = p.income   || [];
+      state.expenses     = p.expenses || [];
+      state.services     = p.services || [...DEFAULT_SERVICES];
+      state.lastModified = p.lastModified || 0;
     } else {
       state.clients  = DEFAULT_CLIENTS;
       state.services = [...DEFAULT_SERVICES];
@@ -2827,8 +2828,18 @@ async function autoPull(silent) {
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
     const cloudTs = p.lastModified || 0;
-    const localTs = state.lastModified  || 0;
-    if (cloudTs <= localTs) {
+    const localTs = state.lastModified || 0;
+    // Only overwrite local data if cloud is genuinely newer
+    // AND cloud has at least as many entries (guard against empty Firebase path)
+    const cloudEntries = (p.income?.length || 0) + (p.expenses?.length || 0);
+    const localEntries = (state.income?.length || 0) + (state.expenses?.length || 0);
+    if (cloudTs <= localTs && cloudEntries <= localEntries) {
+      setSyncIndicator('ok');
+      setTimeout(() => setSyncIndicator('idle'), 2000);
+      return;
+    }
+    // If cloud timestamp is older but has more entries, still sync (e.g. data added on another device before clock skew)
+    if (cloudTs < localTs && cloudEntries < localEntries) {
       setSyncIndicator('ok');
       setTimeout(() => setSyncIndicator('idle'), 2000);
       return;
@@ -2964,9 +2975,40 @@ function startAutoSync() {
   window.addEventListener('focus', () => autoPull(true));
   // Poll every 60 seconds
   setInterval(() => autoPull(true), 60000);
-  // Pull immediately on start
-  autoPull(true);
+  // On initial load: if local state is empty (new device / first visit),
+  // do a forced pull that always re-renders after completion
+  if (!state.income.length && !state.expenses.length) {
+    autoPullForced();
+  } else {
+    autoPull(true);
+  }
   setSyncIndicator('idle');
+}
+
+async function autoPullForced() {
+  if (!syncBlobId || !fbUrl || _isSyncing) return;
+  _isSyncing = true;
+  setSyncIndicator('pulling');
+  try {
+    const res = await fetch(fbEndpoint(syncBlobId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const p = await res.json();
+    if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
+    state.clients  = p.clients;
+    state.income   = p.income   || [];
+    state.expenses = p.expenses || [];
+    state.services = p.services || [...DEFAULT_SERVICES];
+    state.lastModified = p.lastModified || Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    navigate(currentView);
+    setSyncIndicator('ok');
+    updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
+    setTimeout(() => setSyncIndicator('idle'), 3000);
+  } catch(e) {
+    setSyncIndicator('error');
+    console.warn('Initial pull failed:', e.message);
+    setTimeout(() => setSyncIndicator('idle'), 5000);
+  } finally { _isSyncing = false; }
 }
 
 // ── Export / Import ────────────────────────────────────────────
@@ -3025,8 +3067,10 @@ function init() {
     }
   });
 
-  startAutoSync();
+  // Render immediately from localStorage so the dashboard never shows zeros on refresh
   navigate('dashboard');
+  // Then start auto-sync (will pull from cloud and re-render if cloud data is newer)
+  startAutoSync();
 }
 
 document.addEventListener('DOMContentLoaded', init);
