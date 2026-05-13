@@ -2853,19 +2853,19 @@ async function autoPull(silent) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
-    const cloudTs = p.lastModified || 0;
-    const localTs = state.lastModified || 0;
-    // Only overwrite local data if cloud is genuinely newer
-    // AND cloud has at least as many entries (guard against empty Firebase path)
+    const cloudTs      = p.lastModified || 0;
+    const localTs      = state.lastModified || 0;
     const cloudEntries = (p.income?.length || 0) + (p.expenses?.length || 0);
     const localEntries = (state.income?.length || 0) + (state.expenses?.length || 0);
-    if (cloudTs <= localTs && cloudEntries <= localEntries) {
+
+    // NEVER overwrite local data with fewer entries — local is always the safer copy
+    if (cloudEntries < localEntries) {
       setSyncIndicator('ok');
       setTimeout(() => setSyncIndicator('idle'), 2000);
       return;
     }
-    // If cloud timestamp is older but has more entries, still sync (e.g. data added on another device before clock skew)
-    if (cloudTs < localTs && cloudEntries < localEntries) {
+    // Skip if local is same age or newer (and cloud doesn't have more entries)
+    if (cloudTs <= localTs && cloudEntries <= localEntries) {
       setSyncIndicator('ok');
       setTimeout(() => setSyncIndicator('idle'), 2000);
       return;
@@ -3098,10 +3098,12 @@ function init() {
     if (document.visibilityState === 'visible') autoPull(true);
   });
 
-  // Render immediately from localStorage so the dashboard never shows zeros on refresh
+  // Render immediately from localStorage
   navigate('dashboard');
-  // Then start auto-sync (will pull from cloud and re-render if cloud data is newer)
+  // Start auto-sync (will pull from cloud and re-render only if cloud data is newer)
   startAutoSync();
+  // Safety net: re-render after 300ms in case any async op clobbered the first render
+  setTimeout(() => renderView('dashboard'), 300);
 }
 
 document.addEventListener('DOMContentLoaded', init);
