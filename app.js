@@ -2702,6 +2702,104 @@ function generateRecurring(silent=false) {
   }
 }
 
+// ── Cloud Sync (jsonblob.com) ──────────────────────────────────
+const BLOB_KEY = 'bm_sync_blob_id';
+let syncBlobId = localStorage.getItem(BLOB_KEY) || '';
+
+async function cloudPush() {
+  if (!syncBlobId) { showToast('No sync code — create one first','error'); return; }
+  const btn = document.getElementById('cloudPushBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing…'; }
+  try {
+    const res = await fetch('https://jsonblob.com/api/jsonBlob/' + syncBlobId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    showToast('✓ Data pushed to cloud');
+    document.getElementById('cloudSyncStatus').textContent = 'Last push: ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    showToast('Push failed: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Push to Cloud'; }
+  }
+}
+
+async function cloudPull() {
+  if (!syncBlobId) { showToast('No sync code — enter one first','error'); return; }
+  const btn = document.getElementById('cloudPullBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pulling…'; }
+  try {
+    const res = await fetch('https://jsonblob.com/api/jsonBlob/' + syncBlobId, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const p = await res.json();
+    if (p.clients && Array.isArray(p.clients)) {
+      state.clients  = p.clients;
+      state.income   = p.income   || [];
+      state.expenses = p.expenses || [];
+      state.services = p.services || [...DEFAULT_SERVICES];
+      saveData();
+      navigate(currentView);
+      showToast('✓ Data pulled from cloud');
+      document.getElementById('cloudSyncStatus').textContent = 'Last pull: ' + new Date().toLocaleTimeString();
+    } else {
+      showToast('Invalid data in cloud','error');
+    }
+  } catch(e) {
+    showToast('Pull failed: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Pull from Cloud'; }
+  }
+}
+
+async function cloudCreate() {
+  const btn = document.getElementById('cloudCreateBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating…'; }
+  try {
+    const res = await fetch('https://jsonblob.com/api/jsonBlob', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const loc = res.headers.get('Location') || '';
+    const id = loc.split('/').pop();
+    if (!id) throw new Error('No ID returned');
+    syncBlobId = id;
+    localStorage.setItem(BLOB_KEY, id);
+    document.getElementById('cloudCodeInput').value = id;
+    document.getElementById('cloudSyncStatus').textContent = 'Created & pushed at ' + new Date().toLocaleTimeString();
+    showToast('✓ Cloud sync created! Copy the code to other devices.');
+  } catch(e) {
+    showToast('Create failed: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-plus"></i> Create New'; }
+  }
+}
+
+function cloudSaveCode() {
+  const val = (document.getElementById('cloudCodeInput').value || '').trim();
+  if (!val) { showToast('Enter a sync code first','error'); return; }
+  syncBlobId = val;
+  localStorage.setItem(BLOB_KEY, val);
+  showToast('✓ Sync code saved — you can now Pull');
+}
+
+function openSyncModal() {
+  document.getElementById('cloudCodeInput').value = syncBlobId;
+  document.getElementById('cloudSyncStatus').textContent = syncBlobId ? 'Code loaded from this device' : 'No sync code on this device';
+  document.getElementById('syncModal').classList.add('open');
+  document.getElementById('modalOverlay').classList.remove('hidden');
+}
+
+function closeSyncModal() {
+  document.getElementById('syncModal').classList.remove('open');
+  document.getElementById('modalOverlay').classList.add('hidden');
+}
+
 // ── Export / Import ────────────────────────────────────────────
 function exportData() {
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
@@ -2737,8 +2835,10 @@ function init() {
   document.getElementById('modalOverlay').addEventListener('click', ()=>{
     const cd  = document.getElementById('confirmDialog');
     const edd = document.getElementById('entryDetailDialog');
+    const sm  = document.getElementById('syncModal');
     if (cd&&cd.classList.contains('open'))   cancelDelete();
     else if (edd&&edd.classList.contains('open')) closeEntryDetail();
+    else if (sm&&sm.classList.contains('open')) closeSyncModal();
     else closeAllModals();
   });
 
