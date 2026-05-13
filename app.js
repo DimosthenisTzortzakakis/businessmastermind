@@ -2704,15 +2704,34 @@ function generateRecurring(silent=false) {
   }
 }
 
-// ── Cloud Sync — fully automatic ──────────────────────────────
-const SYNC_FN = '/.netlify/functions/sync';
-const BLOB_KEY = 'bm_sync_blob_id';
-let syncBlobId = localStorage.getItem(BLOB_KEY) || '';
+// ── Cloud Sync — Firebase Realtime Database ────────────────────
+// Works directly from browser, no proxy needed, completely free.
+const BLOB_KEY     = 'bm_sync_blob_id';
+const FB_URL_KEY   = 'bm_firebase_url';
+let syncBlobId  = localStorage.getItem(BLOB_KEY)   || '';
+let fbUrl       = localStorage.getItem(FB_URL_KEY) || '';
 let _autoPushTimer = null;
-let _isSyncing = false;
+let _isSyncing  = false;
+
+function fbEndpoint(id) {
+  return fbUrl.replace(/\/+$/, '') + '/bmsync/' + id + '.json';
+}
+
+// Encode Firebase URL + sync ID into one portable string
+function encodeSyncCode(url, id) {
+  try { return btoa(unescape(encodeURIComponent(url + '||' + id))); }
+  catch { return btoa(url + '||' + id); }
+}
+function decodeSyncCode(code) {
+  try {
+    const s = decodeURIComponent(escape(atob(code.trim())));
+    const i = s.indexOf('||');
+    if (i < 0) return null;
+    return { url: s.slice(0, i), id: s.slice(i + 2) };
+  } catch { return null; }
+}
 
 function setSyncIndicator(state_) {
-  // state_: 'idle' | 'pushing' | 'pulling' | 'ok' | 'error'
   const el = document.getElementById('cloudSyncDot');
   if (!el) return;
   el.className = 'cloud-sync-dot cs-' + state_;
@@ -2727,22 +2746,48 @@ function updateSyncModalStatus(msg) {
   if (el) el.textContent = msg;
 }
 
-// Debounced auto-push: wait 1.5s after last save, then push
+function updateSyncModalUI() {
+  const fbSection = document.getElementById('syncFirebaseSection');
+  const codeSection = document.getElementById('syncCodeSection');
+  if (!fbSection || !codeSection) return;
+  if (!fbUrl) {
+    fbSection.style.display = 'block';
+    codeSection.style.display = 'none';
+  } else {
+    fbSection.style.display = 'none';
+    codeSection.style.display = 'block';
+    if (syncBlobId) {
+      document.getElementById('cloudCodeInput').value = encodeSyncCode(fbUrl, syncBlobId);
+    }
+  }
+}
+
+function saveFbUrl() {
+  const val = (document.getElementById('fbUrlInput').value || '').trim();
+  if (!val || !val.includes('firebaseio.com')) {
+    showToast('Enter a valid Firebase Database URL', 'error'); return;
+  }
+  fbUrl = val;
+  localStorage.setItem(FB_URL_KEY, fbUrl);
+  updateSyncModalUI();
+  showToast('✓ Firebase URL saved');
+}
+
 function scheduleAutoPush() {
-  if (!syncBlobId) return;
+  if (!syncBlobId || !fbUrl) return;
   clearTimeout(_autoPushTimer);
-  _autoPushTimer = setTimeout(() => autoPush(), 1500);
+  _autoPushTimer = setTimeout(() => autoPush(true), 1500);
 }
 
 async function autoPush(silent) {
-  if (!syncBlobId || _isSyncing) return;
+  if (!syncBlobId || !fbUrl || _isSyncing) return;
   _isSyncing = true;
   setSyncIndicator('pushing');
   try {
-    const res = await fetch(SYNC_FN, {
-      method: 'POST',
+    const res = await fetch(fbEndpoint(syncBlobId), {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'push', id: syncBlobId, data: state })
+      body: JSON.stringify(state)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     setSyncIndicator('ok');
@@ -2753,26 +2798,20 @@ async function autoPush(silent) {
     setSyncIndicator('error');
     console.warn('Auto-push failed:', e.message);
     setTimeout(() => setSyncIndicator('idle'), 5000);
-  } finally {
-    _isSyncing = false;
-  }
+  } finally { _isSyncing = false; }
 }
 
 async function autoPull(silent) {
-  if (!syncBlobId || _isSyncing) return;
+  if (!syncBlobId || !fbUrl || _isSyncing) return;
   _isSyncing = true;
   setSyncIndicator('pulling');
   try {
-    const res = await fetch(SYNC_FN, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pull', id: syncBlobId })
-    });
+    const res = await fetch(fbEndpoint(syncBlobId));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
     const cloudTs = p.lastModified || 0;
-    const localTs = state.lastModified || 0;
+    const localTs = state.lastModified  || 0;
     if (cloudTs <= localTs) {
       setSyncIndicator('ok');
       setTimeout(() => setSyncIndicator('idle'), 2000);
@@ -2793,42 +2832,35 @@ async function autoPull(silent) {
     setSyncIndicator('error');
     console.warn('Auto-pull failed:', e.message);
     setTimeout(() => setSyncIndicator('idle'), 5000);
-  } finally {
-    _isSyncing = false;
-  }
+  } finally { _isSyncing = false; }
 }
 
-// Manual push/pull buttons (for the modal)
 async function cloudPush() {
-  if (!syncBlobId) { showToast('No sync code — create one first','error'); return; }
+  if (!syncBlobId || !fbUrl) { showToast('Set up Cloud Sync first','error'); return; }
   const btn = document.getElementById('cloudPushBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing…'; }
   try {
     state.lastModified = Date.now();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    const res = await fetch(SYNC_FN, {
-      method: 'POST',
+    const res = await fetch(fbEndpoint(syncBlobId), {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'push', id: syncBlobId, data: state })
+      body: JSON.stringify(state)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     showToast('✓ Pushed to cloud');
     updateSyncModalStatus('Last push: ' + new Date().toLocaleTimeString());
     setSyncIndicator('ok'); setTimeout(() => setSyncIndicator('idle'), 3000);
-  } catch(e) { showToast('Push failed: ' + e.message, 'error'); setSyncIndicator('error'); }
+  } catch(e) { showToast('Push failed: ' + e.message, 'error'); }
   finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Force Push'; } }
 }
 
 async function cloudPull() {
-  if (!syncBlobId) { showToast('No sync code — enter one first','error'); return; }
+  if (!syncBlobId || !fbUrl) { showToast('Set up Cloud Sync first','error'); return; }
   const btn = document.getElementById('cloudPullBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pulling…'; }
   try {
-    const res = await fetch(SYNC_FN, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pull', id: syncBlobId })
-    });
+    const res = await fetch(fbEndpoint(syncBlobId));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
@@ -2846,26 +2878,27 @@ async function cloudPull() {
 }
 
 async function cloudCreate() {
+  if (!fbUrl) { showToast('Enter your Firebase URL first','error'); return; }
   const btn = document.getElementById('cloudCreateBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating…'; }
   try {
     state.lastModified = Date.now();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    const res = await fetch(SYNC_FN, {
-      method: 'POST',
+    const id = (crypto.randomUUID ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36));
+    const res = await fetch(fbEndpoint(id), {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create', data: state })
+      body: JSON.stringify(state)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
-    const id = json.id;
-    if (!id) throw new Error('No ID returned');
     syncBlobId = id;
     localStorage.setItem(BLOB_KEY, id);
-    document.getElementById('cloudCodeInput').value = id;
-    updateSyncModalStatus('✓ Auto-sync active');
+    const code = encodeSyncCode(fbUrl, id);
+    document.getElementById('cloudCodeInput').value = code;
+    updateSyncModalStatus('✓ Auto-sync active — copy the code to other devices');
     setSyncIndicator('ok'); setTimeout(() => setSyncIndicator('idle'), 3000);
-    showToast('✓ Cloud sync active! Copy the code to other devices.');
+    showToast('✓ Cloud created! Copy the sync code to your phone.');
   } catch(e) {
     showToast('Create failed: ' + e.message, 'error');
   } finally {
@@ -2876,17 +2909,27 @@ async function cloudCreate() {
 async function cloudSaveCode() {
   const val = (document.getElementById('cloudCodeInput').value || '').trim();
   if (!val) { showToast('Enter a sync code first','error'); return; }
-  syncBlobId = val;
-  localStorage.setItem(BLOB_KEY, val);
-  updateSyncModalStatus('Code saved — pulling latest data…');
+  const decoded = decodeSyncCode(val);
+  if (!decoded) { showToast('Invalid sync code','error'); return; }
+  fbUrl      = decoded.url;
+  syncBlobId = decoded.id;
+  localStorage.setItem(FB_URL_KEY, fbUrl);
+  localStorage.setItem(BLOB_KEY,   syncBlobId);
+  updateSyncModalStatus('Connecting — pulling latest data…');
   await autoPull();
   updateSyncModalStatus('✓ Auto-sync active — syncs automatically');
-  showToast('✓ Sync code saved — auto-sync is now on');
+  showToast('✓ Connected — auto-sync is on');
 }
 
 function openSyncModal() {
-  document.getElementById('cloudCodeInput').value = syncBlobId;
-  updateSyncModalStatus(syncBlobId ? '✓ Auto-sync active' : 'No sync code on this device yet');
+  updateSyncModalUI();
+  if (syncBlobId && fbUrl) {
+    updateSyncModalStatus('✓ Auto-sync active');
+  } else if (fbUrl) {
+    updateSyncModalStatus('Firebase URL saved — create or connect a sync slot');
+  } else {
+    updateSyncModalStatus('Follow the steps below to set up sync');
+  }
   document.getElementById('syncModal').classList.add('open');
   document.getElementById('modalOverlay').classList.remove('hidden');
 }
