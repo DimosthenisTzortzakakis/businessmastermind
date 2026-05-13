@@ -2764,7 +2764,7 @@ function updateSyncModalUI() {
 
 function saveFbUrl() {
   const val = (document.getElementById('fbUrlInput').value || '').trim();
-  if (!val || !val.includes('firebaseio.com')) {
+  if (!val || (!val.includes('firebaseio.com') && !val.includes('firebasedatabase.app'))) {
     showToast('Enter a valid Firebase Database URL', 'error'); return;
   }
   fbUrl = val;
