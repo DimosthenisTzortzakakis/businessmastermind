@@ -54,6 +54,7 @@
       <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar"><i class="fa-solid fa-bars"></i></button>
       <h1 class="topbar-title" id="topbarTitle">Dashboard</h1>
       <div class="topbar-right">
+        <span id="topbarSyncDot" class="topbar-sync-dot cs-idle" onclick="openSyncModal()" title="Sync status"></span>
         <div class="search-wrapper">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
           <input type="text" class="search-input" id="globalSearch" placeholder="Search clients, services, amounts…" oninput="onSearchInput()" autocomplete="off" />

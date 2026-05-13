@@ -2540,3 +2540,19 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   0%,100% { opacity:1; transform: scale(1); }
   50%      { opacity:.5; transform: scale(1.3); }
 }
+
+/* Topbar sync dot — always visible, clickable */
+.topbar-sync-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform .2s;
+}
+.topbar-sync-dot:hover { transform: scale(1.4); }
+.topbar-sync-dot.cs-idle    { background: rgba(255,255,255,0.25); }
+.topbar-sync-dot.cs-pushing { background: #fbbf24; animation: pulse-dot .8s ease-in-out infinite; }
+.topbar-sync-dot.cs-pulling { background: #60a5fa; animation: pulse-dot .8s ease-in-out infinite; }
+.topbar-sync-dot.cs-ok      { background: #34d399; }
+.topbar-sync-dot.cs-error   { background: #f87171; animation: pulse-dot 1s ease-in-out infinite; }

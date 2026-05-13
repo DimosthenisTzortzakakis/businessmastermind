@@ -2750,12 +2750,14 @@ function decodeSyncCode(code) {
 
 function setSyncIndicator(state_) {
   const el = document.getElementById('cloudSyncDot');
-  if (!el) return;
-  el.className = 'cloud-sync-dot cs-' + state_;
+  if (el) el.className = 'cloud-sync-dot cs-' + state_;
   const label = document.getElementById('cloudSyncLabel');
-  if (!label) return;
-  const map = { idle:'Sync ready', pushing:'Pushing…', pulling:'Pulling…', ok:'Synced', error:'Sync error' };
-  label.textContent = map[state_] || '';
+  if (label) {
+    const map = { idle:'Sync ready', pushing:'Saving…', pulling:'Loading…', ok:'Synced ✓', error:'Sync error !' };
+    label.textContent = map[state_] || '';
+  }
+  const topDot = document.getElementById('topbarSyncDot');
+  if (topDot) topDot.className = 'topbar-sync-dot cs-' + (syncBlobId ? state_ : 'idle');
 }
 
 function updateSyncModalStatus(msg) {
@@ -2790,23 +2792,30 @@ function saveFbUrl() {
   showToast('✓ Firebase URL saved');
 }
 
+let _pendingPush = false; // true if unsaved changes haven't reached Firebase yet
+
 function scheduleAutoPush() {
   if (!syncBlobId || !fbUrl) return;
+  _pendingPush = true;
   clearTimeout(_autoPushTimer);
-  _autoPushTimer = setTimeout(() => autoPush(true), 1500);
+  _autoPushTimer = setTimeout(() => autoPush(true), 400);
 }
 
-async function autoPush(silent) {
-  if (!syncBlobId || !fbUrl || _isSyncing) return;
+async function autoPush(silent, keepalive = false) {
+  if (!syncBlobId || !fbUrl) return;
+  if (_isSyncing && !keepalive) return;
   _isSyncing = true;
   setSyncIndicator('pushing');
   try {
+    const body = JSON.stringify(state);
     const res = await fetch(fbEndpoint(syncBlobId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state)
+      body,
+      ...(keepalive ? { keepalive: true } : {})
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
+    _pendingPush = false;
     setSyncIndicator('ok');
     updateSyncModalStatus('Last push: ' + new Date().toLocaleTimeString());
     if (!silent) showToast('☁ Synced to cloud');
@@ -2814,8 +2823,25 @@ async function autoPush(silent) {
   } catch(e) {
     setSyncIndicator('error');
     console.warn('Auto-push failed:', e.message);
+    // Retry once after 3 seconds if it failed
+    setTimeout(() => { if (_pendingPush) autoPush(true); }, 3000);
     setTimeout(() => setSyncIndicator('idle'), 5000);
   } finally { _isSyncing = false; }
+}
+
+// Push immediately when user leaves the page (covers refresh, tab close, navigation)
+function emergencyPush() {
+  if (!_pendingPush || !syncBlobId || !fbUrl) return;
+  // Use keepalive so the browser completes the request even after page unloads
+  try {
+    const body = JSON.stringify(state);
+    fetch(fbEndpoint(syncBlobId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true
+    });
+  } catch(e) { /* best-effort */ }
 }
 
 async function autoPull(silent) {
@@ -2968,13 +2994,10 @@ function closeSyncModal() {
 
 function startAutoSync() {
   if (!syncBlobId) return;
-  // Pull on page-focus (switching back to app from another tab/app)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') autoPull(true);
-  });
+  // Pull when window regains focus
   window.addEventListener('focus', () => autoPull(true));
-  // Poll every 60 seconds
-  setInterval(() => autoPull(true), 60000);
+  // Poll every 30 seconds
+  setInterval(() => autoPull(true), 30000);
   // On initial load: if local state is empty (new device / first visit),
   // do a forced pull that always re-renders after completion
   if (!state.income.length && !state.expenses.length) {
@@ -3065,6 +3088,14 @@ function init() {
     if (!e.target.closest('.search-wrapper') && !e.target.closest('.search-results-panel')) {
       document.getElementById('searchResultsPanel').classList.add('hidden');
     }
+  });
+
+  // Push data before page closes/refreshes so other devices always get latest
+  window.addEventListener('pagehide',       emergencyPush);
+  window.addEventListener('beforeunload',   emergencyPush);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') emergencyPush();
+    if (document.visibilityState === 'visible') autoPull(true);
   });
 
   // Render immediately from localStorage so the dashboard never shows zeros on refresh
