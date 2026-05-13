@@ -133,7 +133,9 @@ function loadData() {
 }
 
 function saveData() {
+  state.lastModified = Date.now();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  scheduleAutoPush();
 }
 
 // ── Google Sheets Sync ─────────────────────────────────────────
@@ -2702,14 +2704,39 @@ function generateRecurring(silent=false) {
   }
 }
 
-// ── Cloud Sync (jsonblob.com) ──────────────────────────────────
+// ── Cloud Sync (jsonblob.com) — fully automatic ────────────────
 const BLOB_KEY = 'bm_sync_blob_id';
 let syncBlobId = localStorage.getItem(BLOB_KEY) || '';
+let _autoPushTimer = null;
+let _isSyncing = false;
 
-async function cloudPush() {
-  if (!syncBlobId) { showToast('No sync code — create one first','error'); return; }
-  const btn = document.getElementById('cloudPushBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing…'; }
+function setSyncIndicator(state_) {
+  // state_: 'idle' | 'pushing' | 'pulling' | 'ok' | 'error'
+  const el = document.getElementById('cloudSyncDot');
+  if (!el) return;
+  el.className = 'cloud-sync-dot cs-' + state_;
+  const label = document.getElementById('cloudSyncLabel');
+  if (!label) return;
+  const map = { idle:'Sync ready', pushing:'Pushing…', pulling:'Pulling…', ok:'Synced', error:'Sync error' };
+  label.textContent = map[state_] || '';
+}
+
+function updateSyncModalStatus(msg) {
+  const el = document.getElementById('cloudSyncStatus');
+  if (el) el.textContent = msg;
+}
+
+// Debounced auto-push: wait 1.5s after last save, then push
+function scheduleAutoPush() {
+  if (!syncBlobId) return;
+  clearTimeout(_autoPushTimer);
+  _autoPushTimer = setTimeout(() => autoPush(), 1500);
+}
+
+async function autoPush(silent) {
+  if (!syncBlobId || _isSyncing) return;
+  _isSyncing = true;
+  setSyncIndicator('pushing');
   try {
     const res = await fetch('https://jsonblob.com/api/jsonBlob/' + syncBlobId, {
       method: 'PUT',
@@ -2717,13 +2744,80 @@ async function cloudPush() {
       body: JSON.stringify(state)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    showToast('✓ Data pushed to cloud');
-    document.getElementById('cloudSyncStatus').textContent = 'Last push: ' + new Date().toLocaleTimeString();
+    setSyncIndicator('ok');
+    const t = new Date().toLocaleTimeString();
+    updateSyncModalStatus('Last push: ' + t);
+    if (!silent) showToast('☁ Synced to cloud');
+    setTimeout(() => setSyncIndicator('idle'), 3000);
   } catch(e) {
-    showToast('Push failed: ' + e.message, 'error');
+    setSyncIndicator('error');
+    console.warn('Auto-push failed:', e.message);
+    setTimeout(() => setSyncIndicator('idle'), 5000);
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Push to Cloud'; }
+    _isSyncing = false;
   }
+}
+
+async function autoPull(silent) {
+  if (!syncBlobId || _isSyncing) return;
+  _isSyncing = true;
+  setSyncIndicator('pulling');
+  try {
+    const res = await fetch('https://jsonblob.com/api/jsonBlob/' + syncBlobId, {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const p = await res.json();
+    if (!p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
+    const cloudTs = p.lastModified || 0;
+    const localTs = state.lastModified || 0;
+    if (cloudTs <= localTs) {
+      // Cloud is same or older — nothing to do
+      setSyncIndicator('ok');
+      setTimeout(() => setSyncIndicator('idle'), 2000);
+      return;
+    }
+    // Cloud is newer — apply it
+    state.clients  = p.clients;
+    state.income   = p.income   || [];
+    state.expenses = p.expenses || [];
+    state.services = p.services || [...DEFAULT_SERVICES];
+    state.lastModified = cloudTs;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    navigate(currentView);
+    setSyncIndicator('ok');
+    const t = new Date().toLocaleTimeString();
+    updateSyncModalStatus('Last pull: ' + t);
+    if (!silent) showToast('☁ Updated from cloud');
+    setTimeout(() => setSyncIndicator('idle'), 3000);
+  } catch(e) {
+    setSyncIndicator('error');
+    console.warn('Auto-pull failed:', e.message);
+    setTimeout(() => setSyncIndicator('idle'), 5000);
+  } finally {
+    _isSyncing = false;
+  }
+}
+
+// Manual push/pull buttons (for the modal)
+async function cloudPush() {
+  if (!syncBlobId) { showToast('No sync code — create one first','error'); return; }
+  const btn = document.getElementById('cloudPushBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing…'; }
+  try {
+    state.lastModified = Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const res = await fetch('https://jsonblob.com/api/jsonBlob/' + syncBlobId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    showToast('✓ Pushed to cloud');
+    updateSyncModalStatus('Last push: ' + new Date().toLocaleTimeString());
+    setSyncIndicator('ok'); setTimeout(() => setSyncIndicator('idle'), 3000);
+  } catch(e) { showToast('Push failed: ' + e.message, 'error'); setSyncIndicator('error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Force Push'; } }
 }
 
 async function cloudPull() {
@@ -2736,29 +2830,26 @@ async function cloudPull() {
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
-    if (p.clients && Array.isArray(p.clients)) {
-      state.clients  = p.clients;
-      state.income   = p.income   || [];
-      state.expenses = p.expenses || [];
-      state.services = p.services || [...DEFAULT_SERVICES];
-      saveData();
-      navigate(currentView);
-      showToast('✓ Data pulled from cloud');
-      document.getElementById('cloudSyncStatus').textContent = 'Last pull: ' + new Date().toLocaleTimeString();
-    } else {
-      showToast('Invalid data in cloud','error');
-    }
-  } catch(e) {
-    showToast('Pull failed: ' + e.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Pull from Cloud'; }
-  }
+    if (!p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
+    state.clients  = p.clients;
+    state.income   = p.income   || [];
+    state.expenses = p.expenses || [];
+    state.services = p.services || [...DEFAULT_SERVICES];
+    state.lastModified = p.lastModified || Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    navigate(currentView);
+    showToast('✓ Pulled from cloud');
+    updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
+  } catch(e) { showToast('Pull failed: ' + e.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Force Pull'; } }
 }
 
 async function cloudCreate() {
   const btn = document.getElementById('cloudCreateBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating…'; }
   try {
+    state.lastModified = Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     const res = await fetch('https://jsonblob.com/api/jsonBlob', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -2771,8 +2862,9 @@ async function cloudCreate() {
     syncBlobId = id;
     localStorage.setItem(BLOB_KEY, id);
     document.getElementById('cloudCodeInput').value = id;
-    document.getElementById('cloudSyncStatus').textContent = 'Created & pushed at ' + new Date().toLocaleTimeString();
-    showToast('✓ Cloud sync created! Copy the code to other devices.');
+    updateSyncModalStatus('✓ Auto-sync active');
+    setSyncIndicator('ok'); setTimeout(() => setSyncIndicator('idle'), 3000);
+    showToast('✓ Cloud sync active! Copy the code to other devices.');
   } catch(e) {
     showToast('Create failed: ' + e.message, 'error');
   } finally {
@@ -2780,17 +2872,20 @@ async function cloudCreate() {
   }
 }
 
-function cloudSaveCode() {
+async function cloudSaveCode() {
   const val = (document.getElementById('cloudCodeInput').value || '').trim();
   if (!val) { showToast('Enter a sync code first','error'); return; }
   syncBlobId = val;
   localStorage.setItem(BLOB_KEY, val);
-  showToast('✓ Sync code saved — you can now Pull');
+  updateSyncModalStatus('Code saved — pulling latest data…');
+  await autoPull();
+  updateSyncModalStatus('✓ Auto-sync active — syncs automatically');
+  showToast('✓ Sync code saved — auto-sync is now on');
 }
 
 function openSyncModal() {
   document.getElementById('cloudCodeInput').value = syncBlobId;
-  document.getElementById('cloudSyncStatus').textContent = syncBlobId ? 'Code loaded from this device' : 'No sync code on this device';
+  updateSyncModalStatus(syncBlobId ? '✓ Auto-sync active' : 'No sync code on this device yet');
   document.getElementById('syncModal').classList.add('open');
   document.getElementById('modalOverlay').classList.remove('hidden');
 }
@@ -2798,6 +2893,20 @@ function openSyncModal() {
 function closeSyncModal() {
   document.getElementById('syncModal').classList.remove('open');
   document.getElementById('modalOverlay').classList.add('hidden');
+}
+
+function startAutoSync() {
+  if (!syncBlobId) return;
+  // Pull on page-focus (switching back to app from another tab/app)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') autoPull(true);
+  });
+  window.addEventListener('focus', () => autoPull(true));
+  // Poll every 60 seconds
+  setInterval(() => autoPull(true), 60000);
+  // Pull immediately on start
+  autoPull(true);
+  setSyncIndicator('idle');
 }
 
 // ── Export / Import ────────────────────────────────────────────
@@ -2864,6 +2973,7 @@ function init() {
     if (asBtn) asBtn.style.display = 'flex';
   }
 
+  startAutoSync();
   navigate('dashboard');
 }
 

@@ -2505,3 +2505,22 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   padding: 8px; background: rgba(255,255,255,0.02); border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.05);
 }
+
+/* ── Cloud sync dot indicator ── */
+.cloud-sync-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-left: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.cs-idle    { background: rgba(255,255,255,0.2); }
+.cs-pushing { background: #fbbf24; animation: pulse-dot .8s ease-in-out infinite; }
+.cs-pulling { background: #60a5fa; animation: pulse-dot .8s ease-in-out infinite; }
+.cs-ok      { background: #34d399; }
+.cs-error   { background: #f87171; }
+@keyframes pulse-dot {
+  0%,100% { opacity:1; transform: scale(1); }
+  50%      { opacity:.5; transform: scale(1.3); }
+}

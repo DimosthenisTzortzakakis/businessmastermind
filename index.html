@@ -40,7 +40,7 @@
       <button class="btn-sidebar-action" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate Recurring</button>
       <button class="btn-sidebar-action" id="instantSyncBtn" style="display:none" onclick="instantSync()"><i class="fa-solid fa-rotate"></i> Instant Sync</button>
       <button class="btn-sidebar-action" id="autoSyncBtn"   style="display:none" onclick="toggleAutoSync()"><i class="fa-solid fa-clock-rotate-left"></i> Auto Sync: OFF</button>
-      <button class="btn-sidebar-action btn-cloud-sync" onclick="openSyncModal()"><i class="fa-solid fa-cloud"></i> Cloud Sync</button>
+      <button class="btn-sidebar-action btn-cloud-sync" onclick="openSyncModal()"><i class="fa-solid fa-cloud"></i> Cloud Sync <span class="cloud-sync-dot cs-idle" id="cloudSyncDot"></span></button>
       <button class="btn-sidebar-action" onclick="exportData()"><i class="fa-solid fa-download"></i> Export JSON</button>
       <button class="btn-sidebar-action" onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-upload"></i> Import JSON</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
@@ -157,30 +157,30 @@
   <!-- CLOUD SYNC MODAL -->
   <div class="sync-modal" id="syncModal">
     <div class="sync-modal-header">
-      <div class="sync-modal-title"><i class="fa-solid fa-cloud"></i> Cloud Sync</div>
+      <div class="sync-modal-title"><i class="fa-solid fa-cloud"></i> Cloud Sync <span id="cloudSyncLabel" style="font-size:12px;opacity:.6;font-weight:400;margin-left:4px"></span></div>
       <button class="sync-modal-close" onclick="closeSyncModal()"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <div class="sync-modal-body">
-      <p class="sync-modal-desc">Your data stays on each device separately. Cloud Sync lets all your devices share the same data using a secret code — no account needed.</p>
+      <p class="sync-modal-desc">Once set up, sync is <strong>fully automatic</strong> — every change you make is instantly saved to the cloud and pulled on all your other devices. No buttons needed.</p>
 
       <div class="sync-section">
-        <div class="sync-section-label">First time on this device?</div>
+        <div class="sync-section-label">Setup</div>
         <div class="sync-code-row">
           <input type="text" id="cloudCodeInput" class="sync-code-input" placeholder="Paste your sync code here…" />
-          <button class="btn-sync-action btn-save-code" onclick="cloudSaveCode()"><i class="fa-solid fa-check"></i> Save Code</button>
+          <button class="btn-sync-action btn-save-code" onclick="cloudSaveCode()"><i class="fa-solid fa-check"></i> Connect</button>
         </div>
-        <div class="sync-or-row"><span>— or —</span></div>
-        <button id="cloudCreateBtn" class="btn-sync-action btn-create-sync" onclick="cloudCreate()"><i class="fa-solid fa-plus"></i> Create New</button>
-        <div class="sync-create-hint">Creates a new cloud slot and uploads your current data. Copy the code to other devices.</div>
+        <div class="sync-or-row"><span>— or first time? —</span></div>
+        <button id="cloudCreateBtn" class="btn-sync-action btn-create-sync" onclick="cloudCreate()"><i class="fa-solid fa-plus"></i> Create New Cloud</button>
+        <div class="sync-create-hint">Creates a new cloud slot and uploads your data. Copy the code to your other devices and click Connect there.</div>
       </div>
 
       <div class="sync-section sync-actions-section">
-        <div class="sync-section-label">Sync your data</div>
+        <div class="sync-section-label">Manual override</div>
         <div class="sync-btns-row">
-          <button id="cloudPushBtn" class="btn-sync-action btn-push" onclick="cloudPush()"><i class="fa-solid fa-cloud-arrow-up"></i> Push to Cloud</button>
-          <button id="cloudPullBtn" class="btn-sync-action btn-pull" onclick="cloudPull()"><i class="fa-solid fa-cloud-arrow-down"></i> Pull from Cloud</button>
+          <button id="cloudPushBtn" class="btn-sync-action btn-push" onclick="cloudPush()"><i class="fa-solid fa-cloud-arrow-up"></i> Force Push</button>
+          <button id="cloudPullBtn" class="btn-sync-action btn-pull" onclick="cloudPull()"><i class="fa-solid fa-cloud-arrow-down"></i> Force Pull</button>
         </div>
-        <div class="sync-hint-row"><i class="fa-solid fa-circle-info"></i> <strong>Push</strong> = send this device's data up. <strong>Pull</strong> = download cloud data to this device.</div>
+        <div class="sync-hint-row"><i class="fa-solid fa-circle-info"></i> Usually not needed. Use <strong>Force Push</strong> if this device has the latest data; <strong>Force Pull</strong> to overwrite this device with cloud data.</div>
       </div>
 
       <div class="sync-status-row" id="cloudSyncStatus">No sync code on this device</div>
