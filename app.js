@@ -2704,8 +2704,8 @@ function generateRecurring(silent=false) {
   }
 }
 
-// ── Cloud Sync (jsonbin.io) — fully automatic ─────────────────
-const JSONBIN_API = 'https://api.jsonbin.io/v3/b';
+// ── Cloud Sync — fully automatic ──────────────────────────────
+const SYNC_FN = '/.netlify/functions/sync';
 const BLOB_KEY = 'bm_sync_blob_id';
 let syncBlobId = localStorage.getItem(BLOB_KEY) || '';
 let _autoPushTimer = null;
@@ -2739,10 +2739,10 @@ async function autoPush(silent) {
   _isSyncing = true;
   setSyncIndicator('pushing');
   try {
-    const res = await fetch(JSONBIN_API + '/' + syncBlobId, {
-      method: 'PUT',
+    const res = await fetch(SYNC_FN, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state)
+      body: JSON.stringify({ action: 'push', id: syncBlobId, data: state })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     setSyncIndicator('ok');
@@ -2763,10 +2763,13 @@ async function autoPull(silent) {
   _isSyncing = true;
   setSyncIndicator('pulling');
   try {
-    const res = await fetch(JSONBIN_API + '/' + syncBlobId + '/latest');
+    const res = await fetch(SYNC_FN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pull', id: syncBlobId })
+    });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
-    const p = json.record;
+    const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
     const cloudTs = p.lastModified || 0;
     const localTs = state.lastModified || 0;
@@ -2803,10 +2806,10 @@ async function cloudPush() {
   try {
     state.lastModified = Date.now();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    const res = await fetch(JSONBIN_API + '/' + syncBlobId, {
-      method: 'PUT',
+    const res = await fetch(SYNC_FN, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state)
+      body: JSON.stringify({ action: 'push', id: syncBlobId, data: state })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     showToast('✓ Pushed to cloud');
@@ -2821,10 +2824,13 @@ async function cloudPull() {
   const btn = document.getElementById('cloudPullBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pulling…'; }
   try {
-    const res = await fetch(JSONBIN_API + '/' + syncBlobId + '/latest');
+    const res = await fetch(SYNC_FN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pull', id: syncBlobId })
+    });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
-    const p = json.record;
+    const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
     state.clients  = p.clients;
     state.income   = p.income   || [];
@@ -2845,14 +2851,14 @@ async function cloudCreate() {
   try {
     state.lastModified = Date.now();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    const res = await fetch(JSONBIN_API, {
+    const res = await fetch(SYNC_FN, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Bin-Name': 'BusinessMastermind' },
-      body: JSON.stringify(state)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', data: state })
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const json = await res.json();
-    const id = json.metadata && json.metadata.id;
+    const id = json.id;
     if (!id) throw new Error('No ID returned');
     syncBlobId = id;
     localStorage.setItem(BLOB_KEY, id);
