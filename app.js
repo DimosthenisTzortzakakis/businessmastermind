@@ -366,6 +366,7 @@ function renderSearchResults() {
 function navigate(view) {
   currentView = view;
   clearSearch();
+  document.body.classList.remove('sidebar-mobile-open');
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.bottom-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.view').forEach(el=>el.classList.add('hidden'));
@@ -1425,7 +1426,11 @@ function qeSubNoteBlur(inp) {
 }
 
 function toggleSidebar() {
-  document.body.classList.toggle('sidebar-hidden');
+  if (window.innerWidth <= 768) {
+    document.body.classList.toggle('sidebar-mobile-open');
+  } else {
+    document.body.classList.toggle('sidebar-hidden');
+  }
 }
 
 function toggleQEGridClient(id, checked) {

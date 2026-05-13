@@ -243,6 +243,24 @@ a { text-decoration: none; color: inherit; }
 /* ============================================================
    LAYOUT — Mobile
    ============================================================ */
+/* Mobile sidebar overlay */
+.sidebar-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 199;
+  backdrop-filter: blur(2px);
+}
+.sidebar-mobile-open .sidebar-overlay { display: block; }
+.sidebar-mobile-open .sidebar {
+  transform: translateX(0) !important;
+  display: flex !important;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 200;
+  box-shadow: 4px 0 32px rgba(0,0,0,0.5);
+}
+
 @media (max-width: 768px) {
   .sidebar { display: none; }
   .main-content { margin-left: 0; padding-bottom: var(--bottom-nav-h); }
