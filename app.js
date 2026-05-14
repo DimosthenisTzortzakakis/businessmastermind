@@ -337,8 +337,27 @@ function closeAllModals() {
 }
 
 function openAddPicker()  { closeAllModals(); _openSheet('sheetPicker'); }
-function openAddIncome()  { _closeSheetSync('sheetPicker'); resetIncomeForm(); _openSheet('sheetIncome'); filterServicePills('incomeService','incServicePills'); }
-function openAddExpense() { _closeSheetSync('sheetPicker'); resetExpenseForm(); _openSheet('sheetExpense'); }
+function openAddIncome() {
+  _closeSheetSync('sheetPicker');
+  resetIncomeForm();
+  _openSheet('sheetIncome');
+  filterServicePills('incomeService','incServicePills');
+  // Always start at top so client/service/amount are visible first
+  requestAnimationFrame(() => {
+    const s = document.querySelector('#sheetIncome .form-scroll');
+    if (s) s.scrollTop = 0;
+  });
+}
+function openAddExpense() {
+  _closeSheetSync('sheetPicker');
+  resetExpenseForm();
+  _openSheet('sheetExpense');
+  // Always start at top so category/vendor are visible first
+  requestAnimationFrame(() => {
+    const s = document.querySelector('#sheetExpense .form-scroll');
+    if (s) s.scrollTop = 0;
+  });
+}
 function backToPicker()   { _closeSheetSync('sheetIncome'); _closeSheetSync('sheetExpense'); _openSheet('sheetPicker'); }
 
 function closeSheet(id) {
@@ -871,27 +890,36 @@ function updateVATPreview() {
 }
 
 function sheetError(fieldId, msg) {
-  // Show error banner at top of the sheet's form-scroll and scroll to the field
-  const field  = document.getElementById(fieldId);
-  const scroll = field && field.closest('.form-scroll');
+  const field = document.getElementById(fieldId);
+  // Highlight the field red
   if (field) {
-    field.style.borderColor = 'var(--red)';
-    field.style.boxShadow   = '0 0 0 2px rgba(239,68,68,0.35)';
-    setTimeout(() => { field.style.borderColor=''; field.style.boxShadow=''; }, 3000);
-    field.scrollIntoView({ behavior:'smooth', block:'center' });
+    field.style.borderColor = '#ef4444';
+    field.style.boxShadow   = '0 0 0 3px rgba(239,68,68,0.4)';
+    setTimeout(() => { field.style.borderColor = ''; field.style.boxShadow = ''; }, 3500);
+    // Scroll the form-scroll container to the field
+    const formScroll = field.closest('.form-scroll');
+    if (formScroll) {
+      const fieldTop = field.getBoundingClientRect().top - formScroll.getBoundingClientRect().top + formScroll.scrollTop - 20;
+      formScroll.scrollTo({ top: fieldTop, behavior: 'smooth' });
+    }
   }
-  // Show an error bar inside the sheet (always visible regardless of scroll position)
+  // Giant red banner that can't be missed — fixed at top of screen
   let bar = document.getElementById('sheetErrorBar');
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'sheetErrorBar';
-    bar.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9999;background:#ef4444;color:#fff;padding:10px 20px;border-radius:12px;font-size:14px;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,0.4);pointer-events:none;max-width:320px;text-align:center';
     document.body.appendChild(bar);
   }
+  Object.assign(bar.style, {
+    position:'fixed', top:'0', left:'0', right:'0', zIndex:'99999',
+    background:'#ef4444', color:'#fff', padding:'16px 24px',
+    fontSize:'16px', fontWeight:'700', textAlign:'center',
+    boxShadow:'0 4px 24px rgba(0,0,0,0.5)', display:'block',
+    borderBottom:'3px solid #b91c1c', letterSpacing:'0.2px'
+  });
   bar.textContent = msg;
-  bar.style.display = 'block';
   clearTimeout(bar._t);
-  bar._t = setTimeout(() => { bar.style.display = 'none'; }, 3000);
+  bar._t = setTimeout(() => { bar.style.display = 'none'; }, 3500);
 }
 
 function saveIncome() {
