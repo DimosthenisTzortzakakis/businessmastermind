@@ -870,15 +870,40 @@ function updateVATPreview() {
   document.getElementById('vatGrossText').textContent   = `Client pays: ${fmt(amt+vat)}`;
 }
 
+function sheetError(fieldId, msg) {
+  // Show error banner at top of the sheet's form-scroll and scroll to the field
+  const field  = document.getElementById(fieldId);
+  const scroll = field && field.closest('.form-scroll');
+  if (field) {
+    field.style.borderColor = 'var(--red)';
+    field.style.boxShadow   = '0 0 0 2px rgba(239,68,68,0.35)';
+    setTimeout(() => { field.style.borderColor=''; field.style.boxShadow=''; }, 3000);
+    field.scrollIntoView({ behavior:'smooth', block:'center' });
+  }
+  // Show an error bar inside the sheet (always visible regardless of scroll position)
+  let bar = document.getElementById('sheetErrorBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'sheetErrorBar';
+    bar.style.cssText = 'position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9999;background:#ef4444;color:#fff;padding:10px 20px;border-radius:12px;font-size:14px;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,0.4);pointer-events:none;max-width:320px;text-align:center';
+    document.body.appendChild(bar);
+  }
+  bar.textContent = msg;
+  bar.style.display = 'block';
+  clearTimeout(bar._t);
+  bar._t = setTimeout(() => { bar.style.display = 'none'; }, 3000);
+}
+
 function saveIncome() {
+  document.activeElement && document.activeElement.blur();
   const clientId = document.getElementById('incomeClientId').value;
   const service  = document.getElementById('incomeService').value.trim();
   const amount   = parseFloat(document.getElementById('incomeAmount').value);
   const date     = document.getElementById('incomeDate').value;
 
-  if (!clientId) { showToast('Please select a client','error'); return; }
-  if (!service)  { showToast('Please enter a service','error'); return; }
-  if (!date)     { showToast('Please select a date','error'); return; }
+  if (!clientId) { sheetError('incomeClientSearch', '⚠ Select a client first'); return; }
+  if (!service)  { sheetError('incomeService', '⚠ Enter or pick a service'); return; }
+  if (!date)     { sheetError('incomeDate', '⚠ Select a date'); return; }
 
   const rawDate   = incomeDateMode==='month' ? date+'-01' : date;
   const subClient = document.getElementById('incomeSubClient').value||'';
@@ -900,7 +925,7 @@ function saveIncome() {
     return;
   }
 
-  if (!amount||amount<=0){ showToast('Please enter a valid amount','error'); return; }
+  if (!amount||amount<=0){ sheetError('incomeAmount', '⚠ Enter a valid amount (€)'); return; }
   const vatAmount = incomePaymentType==='invoice' ? amount*VAT_RATE : 0;
 
   // qty meta (optional)
@@ -992,10 +1017,11 @@ function saveExpense() {
   const amount   = parseFloat(document.getElementById('expenseAmount').value);
   const date     = document.getElementById('expenseDate').value;
 
-  if (!category)       { showToast('Please select a category','error'); return; }
-  if (!vendor)         { showToast('Please enter a vendor name','error'); return; }
-  if (!amount||amount<=0){ showToast('Please enter a valid amount','error'); return; }
-  if (!date)           { showToast('Please select a date','error'); return; }
+  document.activeElement && document.activeElement.blur();
+  if (!category)         { sheetError('expenseCategory', '⚠ Select a category'); return; }
+  if (!vendor)           { sheetError('expenseVendor',   '⚠ Enter a vendor name'); return; }
+  if (!amount||amount<=0){ sheetError('expenseAmount',   '⚠ Enter a valid amount (€)'); return; }
+  if (!date)             { sheetError('expenseDate',     '⚠ Select a date'); return; }
 
   const rawDate     = expDateMode==='month' ? date+'-01' : date;
   const description = document.getElementById('expenseDescription').value.trim();
