@@ -337,7 +337,7 @@ function closeAllModals() {
 }
 
 function openAddPicker()  { closeAllModals(); _openSheet('sheetPicker'); }
-function openAddIncome()  { _closeSheetSync('sheetPicker'); resetIncomeForm(); _openSheet('sheetIncome'); }
+function openAddIncome()  { _closeSheetSync('sheetPicker'); resetIncomeForm(); _openSheet('sheetIncome'); filterServicePills('incomeService','incServicePills'); }
 function openAddExpense() { _closeSheetSync('sheetPicker'); resetExpenseForm(); _openSheet('sheetExpense'); }
 function backToPicker()   { _closeSheetSync('sheetIncome'); _closeSheetSync('sheetExpense'); _openSheet('sheetPicker'); }
 
@@ -638,6 +638,34 @@ function updateServicesDatalist() {
   if (!dl) return;
   const svcs = state.services || DEFAULT_SERVICES;
   dl.innerHTML = svcs.map(s=>`<option value="${s}">`).join('');
+  // Also refresh any visible service pill lists
+  ['incomeService','qeServiceInput'].forEach(id => {
+    const inp = document.getElementById(id);
+    const pillsId = id === 'incomeService' ? 'incServicePills' : null;
+    if (inp && pillsId) filterServicePills(id, pillsId);
+  });
+}
+
+function filterServicePills(inputId, pillsId) {
+  const inp   = document.getElementById(inputId);
+  const pills = document.getElementById(pillsId);
+  if (!inp || !pills) return;
+  const q    = (inp.value || '').toLowerCase();
+  const svcs = state.services || DEFAULT_SERVICES;
+  const hits = q ? svcs.filter(s => s.toLowerCase().includes(q)) : svcs;
+  pills.innerHTML = hits.map(s =>
+    `<button type="button" class="service-pill${inp.value===s?' selected':''}"
+      onmousedown="pickService('${inputId}','${pillsId}','${s.replace(/'/g,"\\'")}')">
+      ${s}
+    </button>`
+  ).join('');
+  pills.style.display = hits.length ? 'flex' : 'none';
+}
+
+function pickService(inputId, pillsId, service) {
+  const inp = document.getElementById(inputId);
+  if (inp) inp.value = service;
+  filterServicePills(inputId, pillsId);
 }
 
 // ── Client Combo (Income Form) ─────────────────────────────────
@@ -1481,6 +1509,7 @@ function qeSubNoteBlur(inp) {
     const pen = inp.previousElementSibling;
     if (pen?.classList.contains('qe-note-pen')) pen.style.display = '';
   }
+  captureQEGridData();
 }
 
 function closeMobileSidebar() {
@@ -3159,6 +3188,18 @@ function init() {
 
   // Ensure QE month is set if not restored
   if (!qeGridMonth) qeGridMonth = todayVal().slice(0, 7);
+
+  // Pin bottom nav so it doesn't jump when keyboard opens on iOS
+  if (window.visualViewport) {
+    const pinNav = () => {
+      const nav = document.querySelector('.bottom-nav');
+      if (!nav) return;
+      const offset = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
+      nav.style.transform = offset > 10 ? `translateY(-${offset}px)` : '';
+    };
+    window.visualViewport.addEventListener('resize', pinNav);
+    window.visualViewport.addEventListener('scroll', pinNav);
+  }
 
   // Navigate to last-used view (restored by loadUIState inside loadData)
   navigate(currentView);

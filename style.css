@@ -283,6 +283,10 @@ a { text-decoration: none; color: inherit; }
     align-items: center;
     justify-content: space-around;
     padding-bottom: env(safe-area-inset-bottom);
+    /* Prevent iOS from moving nav when keyboard opens */
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    will-change: transform;
   }
   .bottom-nav-item {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -854,6 +858,36 @@ a { text-decoration: none; color: inherit; }
   scrollbar-width: none;
 }
 .form-scroll::-webkit-scrollbar { display: none; }
+
+/* Service pill picker */
+.service-picker-wrap { position: relative; }
+.service-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 160px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.service-pill {
+  padding: 7px 14px;
+  border-radius: 20px;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: var(--transition);
+  cursor: pointer;
+}
+.service-pill:active,
+.service-pill.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 
 /* Sticky save footer — always visible above keyboard */
 .sheet-footer {

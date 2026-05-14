@@ -237,13 +237,10 @@
       </div>
       <div class="form-group">
         <label class="form-label">Service</label>
-        <input type="text" class="form-input" id="incomeService" list="servicesList" placeholder="Type or select service…" autocomplete="off" />
-        <datalist id="servicesList">
-          <option>Social Media Management</option><option>Videography</option><option>Video Editing</option>
-          <option>Video + Editing Package</option><option>Shorts Editing</option><option>Photo + Video Content</option>
-          <option>Reels / Short Content</option><option>Story Management</option><option>Social Media Strategy</option>
-          <option>Full Agency Package</option>
-        </datalist>
+        <div class="service-picker-wrap">
+          <input type="text" class="form-input" id="incomeService" placeholder="Type or tap a service below…" autocomplete="off" oninput="filterServicePills('incomeService','incServicePills')" onfocus="filterServicePills('incomeService','incServicePills')" />
+          <div class="service-pills" id="incServicePills"></div>
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Pricing Mode</label>
@@ -338,7 +335,7 @@
       </div>
     </div>
     <div class="sheet-footer">
-      <button class="btn-save" onclick="saveIncome()"><i class="fa-solid fa-check"></i> Save Income Entry</button>
+      <button type="button" class="btn-save" onclick="document.activeElement.blur();saveIncome()"><i class="fa-solid fa-check"></i> Save Income Entry</button>
     </div>
   </div>
 
@@ -421,7 +418,7 @@
       </div>
     </div>
     <div class="sheet-footer">
-      <button class="btn-save btn-save-expense" onclick="saveExpense()"><i class="fa-solid fa-check"></i> Save Expense Entry</button>
+      <button type="button" class="btn-save btn-save-expense" onclick="document.activeElement.blur();saveExpense()"><i class="fa-solid fa-check"></i> Save Expense Entry</button>
     </div>
   </div>
 
