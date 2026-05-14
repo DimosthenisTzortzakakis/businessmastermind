@@ -287,7 +287,13 @@ function sheetsDelete(type, id) {
 // ── Helpers ────────────────────────────────────────────────────
 function genId() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function fmt(n)  { return '€'+Number(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function toDateStr(s) { if(!s)return''; const[y,m,d]=s.split('-'); return`${d}/${m}/${y}`; }
+function toDateStr(s) {
+  if (!s) return '';
+  // Strip time portion if ISO datetime (e.g. "2026-05-10T21:00:00.000Z" → "2026-05-10")
+  const clean = s.slice(0, 10);
+  const [,m, d] = clean.split('-');
+  return `${parseInt(d)}/${parseInt(m)}`;  // e.g. "10/5"
+}
 function todayVal()   { return new Date().toISOString().slice(0,10); }
 function monthKey(s)  { return s?s.slice(0,7):''; }
 function monthLabel(k){ const[y,m]=k.split('-'); return MONTH_NAMES[parseInt(m)-1]+' '+y; }
@@ -929,7 +935,9 @@ function sheetError(fieldId, msg) {
 }
 
 function saveIncome() {
-  document.activeElement && document.activeElement.blur();
+  // Blur only input/textarea elements (not buttons — blurring the save button itself cancels the tap on iOS)
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) ae.blur();
   const clientId = document.getElementById('incomeClientId').value;
   const service  = document.getElementById('incomeService').value.trim();
   const amount   = parseFloat(document.getElementById('incomeAmount').value);
@@ -974,14 +982,18 @@ function saveIncome() {
     closeAllModals();
     showToast('Income entry updated');
   } else {
-    const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
-    state.income.push(entry);
-    saveData();
-    sheetsAdd('income', entry);
-    closeAllModals();
-    showToast(`Income saved — ${fmt(amount)}`);
+    try {
+      const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
+      state.income.push(entry);
+      saveData();
+      sheetsAdd('income', entry);
+      closeAllModals();
+      showToast(`✓ Income saved — ${fmt(amount)}`);
+      renderView(currentView);
+    } catch(e) {
+      sheetError(null, '❌ Error saving: ' + e.message);
+    }
   }
-  renderView(currentView);
 }
 
 // ── Expense Form ───────────────────────────────────────────────
@@ -1051,7 +1063,8 @@ function saveExpense() {
   const amount   = parseFloat(document.getElementById('expenseAmount').value);
   const date     = document.getElementById('expenseDate').value;
 
-  document.activeElement && document.activeElement.blur();
+  const ae2 = document.activeElement;
+  if (ae2 && (ae2.tagName === 'INPUT' || ae2.tagName === 'TEXTAREA' || ae2.tagName === 'SELECT')) ae2.blur();
   if (!category)         { sheetError('expenseCategory', '⚠ Select a category'); return; }
   if (!vendor)           { sheetError('expenseVendor',   '⚠ Enter a vendor name'); return; }
   if (!amount||amount<=0){ sheetError('expenseAmount',   '⚠ Enter a valid amount (€)'); return; }
@@ -1069,13 +1082,20 @@ function saveExpense() {
     closeAllModals();
     showToast('Expense entry updated');
   } else {
-    const entry = { id:genId(), category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, createdAt:Date.now() };
-    state.expenses.push(entry);
-    saveData();
-    sheetsAdd('expense', entry);
-    closeAllModals();
-    showToast(`Expense saved — ${fmt(amount)}`, 'error');
+    try {
+      const entry = { id:genId(), category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, createdAt:Date.now() };
+      state.expenses.push(entry);
+      saveData();
+      sheetsAdd('expense', entry);
+      closeAllModals();
+      showToast(`✓ Expense saved — ${fmt(amount)}`);
+      renderView(currentView);
+    } catch(e) {
+      sheetError(null, '❌ Error saving: ' + e.message);
+    }
+    return;
   }
+  // editing path
   renderView(currentView);
 }
 
