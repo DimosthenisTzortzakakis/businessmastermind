@@ -261,13 +261,14 @@ a { text-decoration: none; color: inherit; }
     width: var(--sidebar-width);
     box-shadow: 4px 0 32px rgba(0,0,0,0.6);
   }
-  .main-content { margin-left: 0; padding-bottom: var(--bottom-nav-h); }
+  .main-content { margin-left: 0; }
   .topbar { padding: 0 16px; }
   .topbar-title { font-size: 18px; }
   .btn-add-desktop { display: none; }
   .fab { display: none !important; }
 
-  .view { padding: 16px 16px 24px; }
+  /* extra bottom padding so stats/charts clear the fixed bottom nav */
+  .view { padding: 16px 16px calc(var(--bottom-nav-h) + 32px); }
 
   .bottom-nav {
     display: flex;
@@ -849,10 +850,24 @@ a { text-decoration: none; color: inherit; }
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 4px 24px 32px;
+  padding: 4px 24px 16px;
   scrollbar-width: none;
 }
 .form-scroll::-webkit-scrollbar { display: none; }
+
+/* Sticky save footer — always visible above keyboard */
+.sheet-footer {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+}
+.sheet-footer .btn-save,
+.sheet-footer .btn-save-expense {
+  width: 100%;
+  margin: 0;
+}
 
 /* Picker */
 .picker-options {

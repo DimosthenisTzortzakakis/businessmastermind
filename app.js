@@ -6,6 +6,7 @@ let SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwpnWWC_FLbbSj5WU5pVOT
 const STORAGE_KEY    = 'biz_mastermind_data';
 const QE_GRID_KEY    = 'biz_qe_grid';
 const QE_EXP_KEY     = 'biz_qe_exp';
+const UI_STATE_KEY   = 'biz_ui_state';
 const VAT_RATE       = 0.24;
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -141,6 +142,46 @@ function loadData() {
   try {
     const qe = localStorage.getItem(QE_EXP_KEY);
     if (qe) qeExpenseGridData = JSON.parse(qe);
+  } catch(e) {}
+  // Restore last-used view and all filters
+  loadUIState();
+}
+
+function saveUIState() {
+  try {
+    localStorage.setItem(UI_STATE_KEY, JSON.stringify({
+      currentView, dashMonth,
+      incMonth, incClient, incStatus, incPayType, incViewMode,
+      expMonth, expCategory, expViewMode,
+      qeTab, qeGridMonth, qeGridService, qeGridStatus, qeGridPayType,
+      qeGridSelectedClients, qeExpPayMethod, reportPayFilter
+    }));
+  } catch(e) {}
+}
+
+function loadUIState() {
+  try {
+    const raw = localStorage.getItem(UI_STATE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.currentView)           currentView           = s.currentView;
+    if (s.dashMonth)             dashMonth             = s.dashMonth;
+    if (s.incMonth)              incMonth              = s.incMonth;
+    if (s.incClient)             incClient             = s.incClient;
+    if (s.incStatus)             incStatus             = s.incStatus;
+    if (s.incPayType)            incPayType            = s.incPayType;
+    if (s.incViewMode)           incViewMode           = s.incViewMode;
+    if (s.expMonth)              expMonth              = s.expMonth;
+    if (s.expCategory)           expCategory           = s.expCategory;
+    if (s.expViewMode)           expViewMode           = s.expViewMode;
+    if (s.qeTab)                 qeTab                 = s.qeTab;
+    if (s.qeGridMonth)           qeGridMonth           = s.qeGridMonth;
+    if (s.qeGridService)         qeGridService         = s.qeGridService;
+    if (s.qeGridStatus)          qeGridStatus          = s.qeGridStatus;
+    if (s.qeGridPayType)         qeGridPayType         = s.qeGridPayType;
+    if (s.qeExpPayMethod)        qeExpPayMethod        = s.qeExpPayMethod;
+    if (s.reportPayFilter)       reportPayFilter       = s.reportPayFilter;
+    if (Array.isArray(s.qeGridSelectedClients)) qeGridSelectedClients = s.qeGridSelectedClients;
   } catch(e) {}
 }
 
@@ -377,6 +418,7 @@ function renderSearchResults() {
 // ── Navigation ─────────────────────────────────────────────────
 function navigate(view) {
   currentView = view;
+  saveUIState();
   clearSearch();
   closeMobileSidebar();
   document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
@@ -764,8 +806,8 @@ function updateSplitPreview() {
   document.getElementById('splitTotalText').textContent = `Client pays total: ${fmt(inv + vat + cash)}`;
 }
 
-function setIncViewMode(m) { incViewMode = m; renderIncome(); }
-function setExpViewMode(m) { expViewMode = m; renderExpenses(); }
+function setIncViewMode(m) { incViewMode = m; saveUIState(); renderIncome(); }
+function setExpViewMode(m) { expViewMode = m; saveUIState(); renderExpenses(); }
 function toggleClientGroup(cid) {
   document.querySelector('.byclient-group[data-cid="'+cid+'"]')?.classList.toggle('expanded');
 }
@@ -1833,7 +1875,7 @@ function renderMonthPills() {
   document.getElementById('monthPills').innerHTML = html;
 }
 
-function setDashMonth(m) { dashMonth=m; renderDashboard(); }
+function setDashMonth(m) { dashMonth=m; saveUIState(); renderDashboard(); }
 
 // ── Statistics ─────────────────────────────────────────────────
 function renderStatistics(filteredInc) {
@@ -3115,12 +3157,15 @@ function init() {
     if (document.visibilityState === 'visible') autoPull(true);
   });
 
-  // Render immediately from localStorage
-  navigate('dashboard');
+  // Ensure QE month is set if not restored
+  if (!qeGridMonth) qeGridMonth = todayVal().slice(0, 7);
+
+  // Navigate to last-used view (restored by loadUIState inside loadData)
+  navigate(currentView);
   // Start auto-sync (will pull from cloud and re-render only if cloud data is newer)
   startAutoSync();
   // Safety net: re-render after 300ms in case any async op clobbered the first render
-  setTimeout(() => renderView('dashboard'), 300);
+  setTimeout(() => renderView(currentView), 300);
 }
 
 document.addEventListener('DOMContentLoaded', init);
