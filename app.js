@@ -318,6 +318,9 @@ function _openSheet(id) {
   const el = document.getElementById(id);
   el.classList.remove('hidden');
   requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('open')));
+  // Hide bottom nav so it never blocks the sheet's save button
+  const nav = document.querySelector('.bottom-nav');
+  if (nav) nav.style.display = 'none';
 }
 
 function _closeSheetSync(id) {
@@ -334,6 +337,9 @@ function closeAllModals() {
   const cd = document.getElementById('confirmDialog');
   if (cd) cd.classList.remove('open');
   document.getElementById('clientDropdown').classList.add('hidden');
+  // Restore bottom nav
+  const nav = document.querySelector('.bottom-nav');
+  if (nav) nav.style.display = '';
 }
 
 function openAddPicker()  { closeAllModals(); _openSheet('sheetPicker'); }
