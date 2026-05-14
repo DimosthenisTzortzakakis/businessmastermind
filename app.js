@@ -134,14 +134,26 @@ function loadData() {
       state.services = [...DEFAULT_SERVICES];
     }
   } catch(e) { state.clients = DEFAULT_CLIENTS; state.services = [...DEFAULT_SERVICES]; }
-  // Restore unsaved QE grid drafts
+  // Restore unsaved QE grid drafts (strip empty-string values to save space)
   try {
     const qg = localStorage.getItem(QE_GRID_KEY);
-    if (qg) qeGridData = JSON.parse(qg);
+    if (qg) {
+      const parsed = JSON.parse(qg);
+      // Purge any empty-string entries left by old code
+      Object.keys(parsed).forEach(k => { if (parsed[k] === '') delete parsed[k]; });
+      qeGridData = parsed;
+      // Write back the cleaned copy
+      try { localStorage.setItem(QE_GRID_KEY, JSON.stringify(qeGridData)); } catch(_) {}
+    }
   } catch(e) {}
   try {
     const qe = localStorage.getItem(QE_EXP_KEY);
-    if (qe) qeExpenseGridData = JSON.parse(qe);
+    if (qe) {
+      const parsed = JSON.parse(qe);
+      Object.keys(parsed).forEach(k => { if (parsed[k] === '') delete parsed[k]; });
+      qeExpenseGridData = parsed;
+      try { localStorage.setItem(QE_EXP_KEY, JSON.stringify(qeExpenseGridData)); } catch(_) {}
+    }
   } catch(e) {}
   // Restore last-used view and all filters
   loadUIState();
@@ -187,7 +199,24 @@ function loadUIState() {
 
 function saveData() {
   state.lastModified = Date.now();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch(e) {
+    if (e.name === 'QuotaExceededError' || e.code === 22 || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+      // Free space by clearing QE draft data, then retry
+      try { localStorage.removeItem(QE_GRID_KEY); } catch(_) {}
+      try { localStorage.removeItem(QE_EXP_KEY); } catch(_) {}
+      qeGridData = {};
+      qeExpenseGridData = {};
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch(e2) {
+        throw e2; // still fails — propagate so caller can show error
+      }
+    } else {
+      throw e;
+    }
+  }
   scheduleAutoPush();
 }
 
@@ -1252,10 +1281,19 @@ function captureQEGridData() {
   if (!table) return;
   table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
     const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-    qeGridData[key] = inp.value;
+    if (inp.value !== '') {
+      qeGridData[key] = inp.value;
+    } else {
+      delete qeGridData[key];
+    }
     if (inp.dataset.type === 'subnote') {
-      qeGridData['notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'')] =
-        (inp.style.display !== 'none' && inp.style.display !== '') ? '1' : '';
+      const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+      const isVisible = inp.style.display !== 'none' && inp.style.display !== '';
+      if (isVisible) {
+        qeGridData[visKey] = '1';
+      } else {
+        delete qeGridData[visKey];
+      }
     }
   });
   // Persist draft to localStorage so it survives refresh
