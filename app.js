@@ -715,7 +715,7 @@ function filterServicePills(inputId, pillsId) {
   const hits = q ? svcs.filter(s => s.toLowerCase().includes(q)) : svcs;
   pills.innerHTML = hits.map(s =>
     `<button type="button" class="service-pill${inp.value===s?' selected':''}"
-      onmousedown="pickService('${inputId}','${pillsId}','${s.replace(/'/g,"\\'")}')">
+      onclick="pickService('${inputId}','${pillsId}','${s.replace(/'/g,"\\'")}')">
       ${s}
     </button>`
   ).join('');
@@ -740,7 +740,7 @@ function filterClientDropdown() {
       const av = c.image
         ? `<img src="${c.image}" style="width:28px;height:28px;object-fit:cover;border-radius:50%;flex-shrink:0">`
         : `<div class="client-dd-avatar" style="background:${c.color}">${initials(c.name)}</div>`;
-      return `<div class="client-dd-item" onmousedown="selectClient('${c.id}')">${av}<span>${c.name}</span></div>`;
+      return `<div class="client-dd-item" onclick="selectClient('${c.id}')">${av}<span>${c.name}</span></div>`;
     }).join('');
   }
   dd.classList.remove('hidden');

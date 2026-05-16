@@ -3,6 +3,11 @@
    Modern fintech design, mobile-first, Inter font
    ============================================================ */
 
+/* Instant tap response on iOS — no 300ms click delay for any button */
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+
 /* Remove number input spinners globally */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -881,6 +886,10 @@ a { text-decoration: none; color: inherit; }
   white-space: nowrap;
   transition: var(--transition);
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .service-pill:active,
 .service-pill.selected {
@@ -1019,6 +1028,8 @@ a { text-decoration: none; color: inherit; }
   display: flex; align-items: center; justify-content: center; gap: 6px;
   white-space: nowrap;
   min-width: 80px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .toggle-btn:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
 .toggle-btn.active {
@@ -1069,9 +1080,11 @@ a { text-decoration: none; color: inherit; }
   transition: var(--transition);
   display: flex; align-items: center; justify-content: center; gap: 10px;
   box-shadow: 0 4px 16px rgba(99,102,241,0.3);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .btn-save:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
-.btn-save:active { transform: scale(0.99); }
+.btn-save:active { transform: scale(0.98); }
 .btn-save-expense {
   background: linear-gradient(135deg, var(--red), #f97316);
   box-shadow: 0 4px 16px rgba(239,68,68,0.3);
@@ -1492,8 +1505,12 @@ a { text-decoration: none; color: inherit; }
   cursor: pointer;
   font-size: 14px; font-weight: 500;
   transition: var(--transition);
+  -webkit-tap-highlight-color: rgba(99,102,241,0.15);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.client-dd-item:hover { background: var(--bg-card2); }
+.client-dd-item:hover, .client-dd-item:active { background: var(--bg-card2); }
 .client-dd-avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
