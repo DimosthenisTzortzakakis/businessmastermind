@@ -964,9 +964,11 @@ function sheetError(fieldId, msg) {
 }
 
 function saveIncome() {
-  // Blur only input/textarea elements (not buttons — blurring the save button itself cancels the tap on iOS)
-  const ae = document.activeElement;
-  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) ae.blur();
+  // Blur any focused input/textarea so values are committed (don't blur buttons)
+  try {
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) ae.blur();
+  } catch(_) {}
   const clientId = document.getElementById('incomeClientId').value;
   const service  = document.getElementById('incomeService').value.trim();
   const amount   = parseFloat(document.getElementById('incomeAmount').value);
@@ -1087,13 +1089,14 @@ function setRecurring(v) {
 }
 
 function saveExpense() {
+  try {
+    const ae2 = document.activeElement;
+    if (ae2 && (ae2.tagName === 'INPUT' || ae2.tagName === 'TEXTAREA' || ae2.tagName === 'SELECT')) ae2.blur();
+  } catch(_) {}
   const category = document.getElementById('expenseCategory').value;
   const vendor   = document.getElementById('expenseVendor').value.trim();
   const amount   = parseFloat(document.getElementById('expenseAmount').value);
   const date     = document.getElementById('expenseDate').value;
-
-  const ae2 = document.activeElement;
-  if (ae2 && (ae2.tagName === 'INPUT' || ae2.tagName === 'TEXTAREA' || ae2.tagName === 'SELECT')) ae2.blur();
   if (!category)         { sheetError('expenseCategory', '⚠ Select a category'); return; }
   if (!vendor)           { sheetError('expenseVendor',   '⚠ Enter a vendor name'); return; }
   if (!amount||amount<=0){ sheetError('expenseAmount',   '⚠ Enter a valid amount (€)'); return; }
@@ -3307,16 +3310,42 @@ function init() {
   // Ensure QE month is set if not restored
   if (!qeGridMonth) qeGridMonth = todayVal().slice(0, 7);
 
-  // Pin bottom nav so it doesn't jump when keyboard opens on iOS
+  // iOS layout fixes: pin bottom nav + keep open sheet inside visual viewport
   if (window.visualViewport) {
-    const pinNav = () => {
+    const adjustViewport = () => {
+      const vv     = window.visualViewport;
+      const vvH    = Math.floor(vv.height);
+      // Pin bottom nav above keyboard
       const nav = document.querySelector('.bottom-nav');
-      if (!nav) return;
-      const offset = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
-      nav.style.transform = offset > 10 ? `translateY(-${offset}px)` : '';
+      if (nav && nav.style.display !== 'none') {
+        const offset = window.innerHeight - vvH - vv.offsetTop;
+        nav.style.transform = offset > 10 ? `translateY(-${offset}px)` : '';
+      }
+      // Constrain any open sheet so its footer is never behind the keyboard
+      const openSheet = document.querySelector('.sheet.open');
+      if (openSheet) {
+        openSheet.style.maxHeight = (vvH * 0.97) + 'px';
+      }
     };
-    window.visualViewport.addEventListener('resize', pinNav);
-    window.visualViewport.addEventListener('scroll', pinNav);
+    window.visualViewport.addEventListener('resize',  adjustViewport);
+    window.visualViewport.addEventListener('scroll',  adjustViewport);
+  }
+
+  // iOS save-button fix: fire on touchend (before keyboard-close reflow) and
+  // suppress the subsequent delayed click so save() doesn't run twice.
+  const incBtn = document.querySelector('#sheetIncome .btn-save');
+  const expBtn = document.querySelector('#sheetExpense .btn-save-expense');
+  if (incBtn) {
+    incBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      saveIncome();
+    }, { passive: false });
+  }
+  if (expBtn) {
+    expBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      saveExpense();
+    }, { passive: false });
   }
 
   // Navigate to last-used view (restored by loadUIState inside loadData)
