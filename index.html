@@ -221,6 +221,10 @@
       <div class="sheet-title">Add Income</div>
       <button class="sheet-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
     </div>
+    <!-- Save button at TOP — always visible even when keyboard is open -->
+    <div class="sheet-top-save">
+      <button type="button" class="btn-save" id="btnSaveIncomeTop" onclick="saveIncome()"><i class="fa-solid fa-check"></i> Save Income Entry</button>
+    </div>
     <div class="form-scroll">
       <div class="form-group">
         <label class="form-label">Client</label>
@@ -346,6 +350,10 @@
       <button class="sheet-back" onclick="backToPicker()"><i class="fa-solid fa-chevron-left"></i></button>
       <div class="sheet-title">Add Expense</div>
       <button class="sheet-close" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <!-- Save button at TOP — always visible even when keyboard is open -->
+    <div class="sheet-top-save">
+      <button type="button" class="btn-save btn-save-expense" id="btnSaveExpenseTop" onclick="saveExpense()"><i class="fa-solid fa-check"></i> Save Expense Entry</button>
     </div>
     <div class="form-scroll">
       <div class="form-group">

@@ -3365,22 +3365,9 @@ function init() {
     window.visualViewport.addEventListener('scroll',  adjustViewport);
   }
 
-  // iOS save-button fix: fire on touchend (before keyboard-close reflow) and
-  // suppress the subsequent delayed click so save() doesn't run twice.
-  const incBtn = document.querySelector('#sheetIncome .btn-save');
-  const expBtn = document.querySelector('#sheetExpense .btn-save-expense');
-  if (incBtn) {
-    incBtn.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      saveIncome();
-    }, { passive: false });
-  }
-  if (expBtn) {
-    expBtn.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      saveExpense();
-    }, { passive: false });
-  }
+  // The save buttons use onclick which is reliable on desktop.
+  // On mobile, the TOP save buttons (sheet-top-save) are always visible
+  // above the keyboard so no special touch handling needed.
 
   // Navigate to last-used view (restored by loadUIState inside loadData)
   navigate(currentView);
