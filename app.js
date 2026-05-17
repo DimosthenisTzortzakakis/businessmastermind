@@ -211,7 +211,9 @@ function saveData() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       } catch(e2) {
-        throw e2; // still fails — propagate so caller can show error
+        // localStorage still full — push to Firebase so data isn't lost
+        scheduleAutoPush();
+        return; // don't throw — data is in memory and being pushed to cloud
       }
     } else {
       throw e;
@@ -930,6 +932,25 @@ function updateVATPreview() {
   document.getElementById('vatGrossText').textContent   = `Client pays: ${fmt(amt+vat)}`;
 }
 
+function showPersistentError(msg) {
+  let bar = document.getElementById('persistentErrorBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'persistentErrorBar';
+    bar.addEventListener('click', () => { bar.style.display = 'none'; });
+    document.body.appendChild(bar);
+  }
+  Object.assign(bar.style, {
+    position:'fixed', top:'0', left:'0', right:'0', zIndex:'999999',
+    background:'#ef4444', color:'#fff', padding:'20px 24px',
+    fontSize:'17px', fontWeight:'700', textAlign:'center',
+    boxShadow:'0 4px 24px rgba(0,0,0,0.7)', display:'block',
+    borderBottom:'3px solid #b91c1c', cursor:'pointer',
+    letterSpacing:'0.2px'
+  });
+  bar.innerHTML = msg + '<br><span style="font-size:13px;font-weight:400;opacity:0.85">Tap to dismiss</span>';
+}
+
 function sheetError(fieldId, msg) {
   const field = document.getElementById(fieldId);
   // Highlight the field red
@@ -1013,17 +1034,20 @@ function saveIncome() {
     closeAllModals();
     showToast('Income entry updated');
   } else {
+    const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
     try {
-      const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
       state.income.push(entry);
       saveData();
-      sheetsAdd('income', entry);
-      closeAllModals();
-      showToast(`✓ Income saved — ${fmt(amount)}`);
-      renderView(currentView);
     } catch(e) {
-      sheetError(null, '❌ Error saving: ' + e.message);
+      // Rollback in-memory state so UI doesn't show unsaved data
+      state.income = state.income.filter(x => x.id !== entry.id);
+      showPersistentError('❌ Could not save — storage full. Clear some space and try again.');
+      return;
     }
+    sheetsAdd('income', entry);
+    closeAllModals();
+    showToast(`✓ Income saved — ${fmt(amount)}`);
+    renderView(currentView);
   }
 }
 
@@ -1114,17 +1138,19 @@ function saveExpense() {
     closeAllModals();
     showToast('Expense entry updated');
   } else {
+    const entry = { id:genId(), category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, createdAt:Date.now() };
     try {
-      const entry = { id:genId(), category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, createdAt:Date.now() };
       state.expenses.push(entry);
       saveData();
-      sheetsAdd('expense', entry);
-      closeAllModals();
-      showToast(`✓ Expense saved — ${fmt(amount)}`);
-      renderView(currentView);
     } catch(e) {
-      sheetError(null, '❌ Error saving: ' + e.message);
+      state.expenses = state.expenses.filter(x => x.id !== entry.id);
+      showPersistentError('❌ Could not save — storage full. Clear some space and try again.');
+      return;
     }
+    sheetsAdd('expense', entry);
+    closeAllModals();
+    showToast(`✓ Expense saved — ${fmt(amount)}`);
+    renderView(currentView);
     return;
   }
   // editing path
@@ -3064,27 +3090,35 @@ async function autoPull(silent) {
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
     const cloudTs      = p.lastModified || 0;
     const localTs      = state.lastModified || 0;
-    const cloudEntries = (p.income?.length || 0) + (p.expenses?.length || 0);
-    const localEntries = (state.income?.length || 0) + (state.expenses?.length || 0);
+    const cloudIncome   = p.income   || [];
+    const cloudExpenses = p.expenses || [];
+    const cloudEntries  = cloudIncome.length + cloudExpenses.length;
+    const localEntries  = (state.income?.length || 0) + (state.expenses?.length || 0);
 
-    // NEVER overwrite local data with fewer entries — local is always the safer copy
-    if (cloudEntries < localEntries) {
-      setSyncIndicator('ok');
-      setTimeout(() => setSyncIndicator('idle'), 2000);
-      return;
-    }
-    // Skip if local is same age or newer (and cloud doesn't have more entries)
+    // Skip if local is strictly newer AND has at least as many entries
     if (cloudTs <= localTs && cloudEntries <= localEntries) {
       setSyncIndicator('ok');
       setTimeout(() => setSyncIndicator('idle'), 2000);
       return;
     }
+
+    // Merge: keep any local entries that cloud doesn't have (by id)
+    const cloudIncomeIds   = new Set(cloudIncome.map(e => e.id));
+    const cloudExpenseIds  = new Set(cloudExpenses.map(e => e.id));
+    const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id));
+    const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id));
+
     state.clients  = p.clients;
-    state.income   = p.income   || [];
-    state.expenses = p.expenses || [];
+    state.income   = [...cloudIncome,   ...localOnlyIncome];
+    state.expenses = [...cloudExpenses, ...localOnlyExpense];
     state.services = p.services || [...DEFAULT_SERVICES];
-    state.lastModified = cloudTs;
+    // Use the newer timestamp
+    state.lastModified = Math.max(cloudTs, localTs);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // If we had local-only entries, push the merged result back to Firebase
+    if (localOnlyIncome.length || localOnlyExpense.length) {
+      scheduleAutoPush();
+    }
     navigate(currentView);
     setSyncIndicator('ok');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
