@@ -1277,8 +1277,23 @@ function cancelDelete() {
 }
 
 function doDelete() {
-  if (pendingDeleteType==='income')  { state.income=state.income.filter(e=>e.id!==pendingDeleteId); showToast('Income entry deleted'); }
-  else if (pendingDeleteType==='expense'){ state.expenses=state.expenses.filter(e=>e.id!==pendingDeleteId); showToast('Expense entry deleted'); }
+  if (pendingDeleteType === 'income') {
+    // Clear QE grid draft data for this entry so it doesn't reappear
+    const entry = state.income.find(e => e.id === pendingDeleteId);
+    if (entry) {
+      const cid = entry.clientId;
+      const dt  = entry.date;
+      Object.keys(qeGridData).forEach(k => {
+        if (k.includes('|' + cid + '|' + dt + '|')) delete qeGridData[k];
+      });
+      try { localStorage.setItem(QE_GRID_KEY, JSON.stringify(qeGridData)); } catch(_) {}
+    }
+    state.income = state.income.filter(e => e.id !== pendingDeleteId);
+    showToast('Income entry deleted');
+  } else if (pendingDeleteType === 'expense') {
+    state.expenses = state.expenses.filter(e => e.id !== pendingDeleteId);
+    showToast('Expense entry deleted');
+  }
   saveData();
   sheetsDelete(pendingDeleteType, pendingDeleteId);
   cancelDelete();

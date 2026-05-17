@@ -826,14 +826,17 @@ a { text-decoration: none; color: inherit; }
 /* On mobile: full-screen so keyboard never covers the form */
 @media (max-width: 768px) {
   .sheet {
-    left: 0;
-    width: 100vw;
-    border-radius: 0;
-    max-height: 100vh;
-    max-height: 100dvh;
-    transform: translateY(100%);
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    border-radius: 0 !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    transform: translateY(100%) !important;
   }
-  .sheet.open { transform: translateY(0); }
+  .sheet.open { transform: translateY(0) !important; }
+  /* Hide the bottom duplicate save button on mobile — top button is enough */
+  .sheet-footer { display: none !important; }
 }
 
 /* Top save button — always visible above keyboard */
@@ -843,7 +846,16 @@ a { text-decoration: none; color: inherit; }
   background: var(--bg-card);
 }
 
-.sheet-wide { width: min(600px, 100vw); }
+.sheet-wide  { width: min(600px, 100vw); }
+/* sheet-small stays a centered bottom-sheet on ALL screen sizes — never goes full-screen */
+.sheet-small {
+  width: min(420px, 96vw) !important;
+  left: 50% !important;
+  right: auto !important;
+  border-radius: 24px 24px 0 0 !important;
+  transform: translateX(-50%) translateY(100%) !important;
+}
+.sheet-small.open { transform: translateX(-50%) translateY(0) !important; }
 
 .sheet-handle {
   width: 40px; height: 4px;
