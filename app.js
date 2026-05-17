@@ -3048,7 +3048,8 @@ function scheduleAutoPush() {
   if (!syncBlobId || !fbUrl) return;
   _pendingPush = true;
   clearTimeout(_autoPushTimer);
-  _autoPushTimer = setTimeout(() => autoPush(true), 400);
+  // Push immediately — no delay. emergencyPush is the fallback if app closes first.
+  _autoPushTimer = setTimeout(() => autoPush(true), 0);
 }
 
 async function autoPush(silent, keepalive = false) {
@@ -3255,7 +3256,7 @@ function startAutoSync() {
   // Pull when window regains focus
   window.addEventListener('focus', () => autoPull(true));
   // Poll every 30 seconds
-  setInterval(() => autoPull(true), 30000);
+  setInterval(() => autoPull(true), 15000); // check every 15s
   // On initial load: if local state is empty (new device / first visit),
   // do a forced pull that always re-renders after completion
   if (!state.income.length && !state.expenses.length) {
