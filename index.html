@@ -147,7 +147,7 @@
     <a class="bottom-nav-item" data-view="income" onclick="navigate('income')"><i class="fa-solid fa-arrow-trend-up"></i><span>Income</span></a>
     <button class="bottom-nav-add" onclick="openAddPicker()"><i class="fa-solid fa-plus"></i></button>
     <a class="bottom-nav-item" data-view="expenses" onclick="navigate('expenses')"><i class="fa-solid fa-arrow-trend-down"></i><span>Expenses</span></a>
-    <a class="bottom-nav-item" data-view="clients" onclick="navigate('clients')"><i class="fa-solid fa-users"></i><span>Clients</span></a>
+    <a class="bottom-nav-item" data-view="quickentry" onclick="navigate('quickentry')"><i class="fa-solid fa-table-cells"></i><span>QE</span></a>
   </nav>
 
   <!-- OVERLAY -->
@@ -330,7 +330,6 @@
         <div class="status-toggle-group">
           <button class="status-btn paid active" id="statusPaid" onclick="setStatus('Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>
           <button class="status-btn pending" id="statusPending" onclick="setStatus('Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
-          <button class="status-btn overdue" id="statusOverdue" onclick="setStatus('Overdue')"><i class="fa-solid fa-triangle-exclamation"></i> Overdue</button>
         </div>
       </div>
       <div class="form-group">

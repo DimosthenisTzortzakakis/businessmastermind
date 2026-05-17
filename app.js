@@ -790,8 +790,6 @@ function resetIncomeForm() {
   incomeStatus = 'Paid';
   document.getElementById('statusPaid').classList.add('active');
   document.getElementById('statusPending').classList.remove('active');
-  document.getElementById('statusOverdue').classList.remove('active');
-
   incRecurring = false;
   document.getElementById('incRecurringYes').classList.remove('active');
   document.getElementById('incRecurringNo').classList.add('active');
@@ -922,7 +920,6 @@ function setStatus(s) {
   incomeStatus = s;
   document.getElementById('statusPaid').classList.toggle('active',    s==='Paid');
   document.getElementById('statusPending').classList.toggle('active', s==='Pending');
-  document.getElementById('statusOverdue').classList.toggle('active', s==='Overdue');
 }
 
 function updateVATPreview() {
@@ -1448,6 +1445,11 @@ function restoreQEGridData() {
     if (!seen.has(k)) { seen.add(k); updateQEClientTotal(inp); }
   });
   updateQEColTotals();
+  // Color the day total cells based on saved entry status
+  document.querySelectorAll('.qe-td-total[data-date]').forEach(cell => {
+    const status = getQERowStatus(cell.dataset.date);
+    applyQETotalColor(cell, status);
+  });
 }
 
 function renderQEIncome(cont) {
@@ -1538,7 +1540,7 @@ function renderQEIncome(cont) {
     return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+ds+'">'
       +'<td class="qe-td-day'+(isToday?' qe-today-day':'')+'">'+day+'</td>'
       +clientCells
-      +'<td class="qe-td-total" data-date="'+ds+'">—</td></tr>';
+      +'<td class="qe-td-total qe-td-total-click" data-date="'+ds+'" onclick="toggleQERowStatus(\''+ds+'\')" title="Tap to toggle Paid/Pending">—</td></tr>';
   }).join('');
 
   // Footer
@@ -1598,6 +1600,55 @@ function renderQEIncome(cont) {
   restoreQEGridData();
 }
 
+// Returns the status of saved income entries for a given date in QE context
+function getQERowStatus(dateStr) {
+  const service = (qeGridService || '').trim();
+  const entries = state.income.filter(e =>
+    e.date === dateStr &&
+    e.date.startsWith(qeGridMonth) &&
+    (!service || e.service === service)
+  );
+  if (!entries.length) return null;
+  return entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
+}
+
+// Toggle all saved income entries for a date between Paid and Pending
+function toggleQERowStatus(dateStr) {
+  const service = (qeGridService || '').trim();
+  const entries = state.income.filter(e =>
+    e.date === dateStr &&
+    e.date.startsWith(qeGridMonth) &&
+    (!service || e.service === service)
+  );
+  if (!entries.length) return; // nothing saved to toggle
+  const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
+  const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
+  entries.forEach(e => { e.status = newStatus; });
+  saveData();
+  // Update the visual in the total cell
+  const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
+  if (cell) applyQETotalColor(cell, newStatus);
+  // Show brief toast
+  showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
+}
+
+// Apply color to a .qe-td-total cell based on status
+function applyQETotalColor(cell, status) {
+  if (status === 'Paid') {
+    cell.style.color = 'var(--green)';
+    cell.style.fontWeight = '700';
+    cell.title = 'Paid — tap to mark Pending';
+  } else if (status === 'Pending') {
+    cell.style.color = '#f59e0b';
+    cell.style.fontWeight = '700';
+    cell.title = 'Pending — tap to mark Paid';
+  } else {
+    cell.style.color = '';
+    cell.style.fontWeight = '';
+    cell.title = 'Tap to toggle status';
+  }
+}
+
 function updateQEClientTotal(inp) {
   // Auto-save draft so values survive a refresh
   captureQEGridData();
@@ -1626,7 +1677,11 @@ function updateQEClientTotal(inp) {
   let dayTotal = 0;
   tr.querySelectorAll('.qe-client-total').forEach(c=>{ dayTotal += parseFloat(c.dataset.value)||0; });
   const dt = tr.querySelector('.qe-td-total');
-  if (dt) dt.textContent = dayTotal > 0 ? fmt(dayTotal) : '—';
+  if (dt) {
+    dt.textContent = dayTotal > 0 ? fmt(dayTotal) : '—';
+    const rowStatus = getQERowStatus(inp.dataset.date || tr.dataset.date);
+    applyQETotalColor(dt, rowStatus);
+  }
   updateQEColTotals();
 }
 
@@ -2183,7 +2238,7 @@ function renderIncome() {
     </div>
     <div class="filter-row">
       <div class="filter-pills-label">Status</div>
-      <div class="filter-pills">${['all','Paid','Pending','Overdue'].map(s=>`<button class="filter-pill ${incStatus===s?'active':''}" onclick="setIncFilter('status','${s}')">${s==='all'?'All':s}</button>`).join('')}</div>
+      <div class="filter-pills">${['all','Paid','Pending'].map(s=>`<button class="filter-pill ${incStatus===s?'active':''}" onclick="setIncFilter('status','${s}')">${s==='all'?'All':s}</button>`).join('')}</div>
       <div class="filter-pills-label">Type</div>
       <div class="filter-pills">${[['all','All'],['invoice','Invoice'],['cash','Cash']].map(([v,l])=>`<button class="filter-pill ${incPayType===v?'active':''}" onclick="setIncFilter('paytype','${v}')">${l}</button>`).join('')}</div>
     </div>
