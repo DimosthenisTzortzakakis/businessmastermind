@@ -1119,7 +1119,7 @@ function saveExpense() {
   const amount   = parseFloat(document.getElementById('expenseAmount').value);
   const date     = document.getElementById('expenseDate').value;
   if (!category)         { sheetError('expenseCategory', '⚠ Select a category'); return; }
-  if (!vendor)           { sheetError('expenseVendor',   '⚠ Enter a vendor name'); return; }
+  if (!vendor)           { sheetError('expenseVendor',   '⚠ Enter a type/supplier'); return; }
   if (!amount||amount<=0){ sheetError('expenseAmount',   '⚠ Enter a valid amount (€)'); return; }
   if (!date)             { sheetError('expenseDate',     '⚠ Select a date'); return; }
 
@@ -1177,7 +1177,7 @@ function openEntryDetail(type, id) {
     title = 'Expense Details';
     html = `
       <div class="ed-row"><span>Category</span><strong>${e.category}</strong></div>
-      <div class="ed-row"><span>Vendor</span><strong>${e.vendor}</strong></div>
+      <div class="ed-row"><span>Type</span><strong>${e.vendor}</strong></div>
       ${e.description?`<div class="ed-row"><span>Description</span><strong>${e.description}</strong></div>`:''}
       <div class="ed-row"><span>Amount</span><strong style="color:var(--red)">${fmt(e.amount)}</strong></div>
       ${e.vatAmount>0?`<div class="ed-row"><span>VAT</span><strong>${fmt(e.vatAmount)}</strong></div>`:''}
@@ -1394,18 +1394,18 @@ function loadQEFromState(table) {
       } else {
         // Direct client — use last/most-recent entry
         const entry = entries[entries.length-1];
+        const qi = tr.querySelector('[data-client="'+cid+'"][data-type="qty"]');
+        const pi = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
         if (entry.qty != null) {
-          const qi = tr.querySelector('[data-client="'+cid+'"][data-type="qty"]');
           if (qi) qi.value = entry.qty;
+        } else if (entry.amount > 0) {
+          // Income added via Add Entry (no qty) — display as 1 × amount so total shows correctly
+          if (qi) qi.value = 1;
         }
         if (entry.unitPrice != null) {
-          const pi = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
           if (pi) pi.value = entry.unitPrice;
-        }
-        // If no qty/unitPrice stored, put amount directly in the total cell
-        if (entry.qty == null && entry.amount) {
-          const tc = tr.querySelector('.qe-client-total[data-client="'+cid+'"]');
-          if (tc) { tc.textContent = fmt(entry.amount); tc.dataset.value = entry.amount; }
+        } else if (entry.amount > 0) {
+          if (pi) pi.value = entry.amount;
         }
         if (entry.notes) {
           const ni = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
@@ -2385,18 +2385,17 @@ function renderIncome() {
       });
       html+='</div>';
     } else {
+      html += '<div class="simple-list">';
       grp.forEach(e=>{
         const c=clientById(e.clientId); const sl=e.status.toLowerCase();
-        const av=c?.image?`<img src="${c.image}" style="width:28px;height:28px;object-fit:cover;border-radius:50%">`:null;
-        html+=`<div class="income-entry ${sl}" onclick="openEntryDetail('income','${e.id}')">
-          <div class="entry-client-badge">${av?av:`<span class="entry-client-dot" style="background:${c?.color||'#888'}"></span>`}${c?.name||'Unknown'}</div>
-          <div class="entry-info"><div class="entry-service">${e.service}</div><div class="entry-meta">${toDateStr(e.date)}${e.subClient?' · '+e.subClient:''}</div></div>
-          <div class="entry-right"><div class="entry-amount">${fmt(e.amount)}</div>
-            <div class="entry-badges"><span class="badge ${e.paymentType}">${e.paymentType==='invoice'?'Invoice':'Cash'}</span><span class="badge ${sl}">${e.status}</span>${e.recurring?'<span class="badge recurring"><i class="fa-solid fa-rotate"></i></span>':''}</div>
-          </div>
+        html+=`<div class="sl-row ${sl}" onclick="openEntryDetail('income','${e.id}')">
+          <span class="sl-date">${toDateStr(e.date)}</span>
+          <span class="sl-client" style="color:${c?.color||'var(--text)'}">${c?.name||'Unknown'}</span>
+          <span class="sl-amount ${sl}">${fmt(e.amount)}</span>
           ${eaInc(e.id)}
         </div>`;
       });
+      html += '</div>';
     }
     html+='</div>';
   });
@@ -2460,7 +2459,7 @@ function renderExpenses() {
           html+=`<div class="entry-compact" onclick="openEntryDetail('expense','${e.id}')">
             <span class="ec-date">${toDateStr(e.date)}</span>
             <span class="ec-sep">·</span>
-            <span class="ec-service">${e.vendor}${e.description?' — '+e.description:''}</span>
+            <span class="ec-service">${e.vendor||e.description||'—'}</span>
             <span class="ec-amount" style="color:var(--red)">${fmt(e.amount)}</span>
             <span class="badge mini">${e.paymentMethod==='Credit Card'?'Card':'Cash'}</span>
             ${eaExp(e.id)}
@@ -2492,7 +2491,7 @@ function renderExpenses() {
     html+=`<div class="excel-wrapper">
       <table class="excel-table" id="expExcelTbl">
         <thead><tr>
-          <th style="width:32px">#</th><th>Date</th><th>Category</th><th>Vendor</th>
+          <th style="width:32px">#</th><th>Date</th><th>Category</th><th>Type</th>
           <th>Description</th><th>Amount (€)</th><th>VAT (€)</th><th>Payment</th><th>Recurring</th><th style="width:90px"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -2522,7 +2521,7 @@ function renderExpenses() {
         html+=`<div class="entry-card expense-card" onclick="openEntryDetail('expense','${e.id}')">
           <div class="entry-card-top exp-top">
             <span class="entry-card-icon">${icon}</span>
-            <span class="entry-card-client">${e.vendor}</span>
+            <span class="entry-card-client">${e.vendor||e.category}</span>
             <span class="entry-card-amount" style="color:var(--red)">${fmt(e.amount)}</span>
           </div>
           <div class="entry-card-service">${e.category}${e.recurring?' · 🔄':''}</div>
@@ -2535,21 +2534,17 @@ function renderExpenses() {
       });
       html+='</div>';
     } else {
+      html += '<div class="simple-list">';
       grp.forEach(e=>{
-        const icon=CATEGORY_ICONS[e.category]||'📦';
-        html+=`<div class="expense-entry" onclick="openEntryDetail('expense','${e.id}')">
-          <div class="expense-cat-icon">${icon}</div>
-          <div class="expense-info"><div class="expense-vendor">${e.vendor}</div>
-            <div class="expense-cat">${e.category} · ${e.paymentMethod}${e.recurring?' · 🔄':''}</div>
-            ${e.description?`<div class="expense-desc">${e.description}</div>`:''}
-          </div>
-          <div class="expense-right"><div class="expense-amount">${fmt(e.amount)}</div>
-            <div class="expense-vat">${toDateStr(e.date)}</div>
-            ${e.vatAmount>0?`<div class="expense-vat">VAT: ${fmt(e.vatAmount)}</div>`:''}
-          </div>
+        const typeLabel = e.vendor || e.category;
+        html+=`<div class="sl-row" onclick="openEntryDetail('expense','${e.id}')">
+          <span class="sl-date">${toDateStr(e.date)}</span>
+          <span class="sl-client">${typeLabel}</span>
+          <span class="sl-amount" style="color:var(--red)">${fmt(e.amount)}</span>
           ${eaExp(e.id)}
         </div>`;
       });
+      html += '</div>';
     }
     html+='</div>';
   });

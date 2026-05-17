@@ -682,6 +682,65 @@ a { text-decoration: none; color: inherit; }
 .expense-vat { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
 /* ============================================================
+   SIMPLE LIST (Detailed view — 3 columns)
+   ============================================================ */
+.simple-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.sl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 0.15s;
+  position: relative;
+}
+.sl-row:hover { background: var(--bg-card-hover, rgba(255,255,255,0.04)); }
+.sl-row:active { opacity: 0.8; }
+.sl-row.pending { border-left: 3px solid var(--amber); }
+.sl-row.paid    { border-left: 3px solid var(--green); }
+.sl-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 72px;
+}
+.sl-client {
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sl-amount {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+.sl-amount.paid    { color: var(--green); }
+.sl-amount.pending { color: var(--amber); }
+.sl-row .entry-actions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  gap: 4px;
+}
+.sl-row:hover .entry-actions { display: flex; }
+
+/* ============================================================
    CLIENTS GRID
    ============================================================ */
 .clients-grid {
@@ -2116,6 +2175,10 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .entry-card .entry-actions { position: static; flex-direction: row; padding: 0; margin-top: 4px; }
 @media (max-width: 600px) {
   .entries-cards-grid { grid-template-columns: 1fr 1fr; }
+  .sl-row .entry-actions { display: flex; position: static; transform: none; margin-left: auto; flex-shrink: 0; }
+  .sl-row { padding-right: 8px; gap: 8px; }
+  .sl-client { font-size: 13px; }
+  .sl-amount { font-size: 13px; }
 }
 
 /* ============================================================
