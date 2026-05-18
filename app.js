@@ -134,25 +134,24 @@ function loadData() {
       state.services = [...DEFAULT_SERVICES];
     }
   } catch(e) { state.clients = DEFAULT_CLIENTS; state.services = [...DEFAULT_SERVICES]; }
+  // Migration: ensure every client has paymentType + subclientPaymentTypes
+  state.clients.forEach(c => {
+    if (!c.paymentType) c.paymentType = 'invoice';
+    if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
+  });
   // Restore unsaved QE grid drafts (strip empty-string values to save space)
   try {
     const qg = localStorage.getItem(QE_GRID_KEY);
     if (qg) {
       const parsed = JSON.parse(qg);
-      // Purge any empty-string entries left by old code
-      Object.keys(parsed).forEach(k => { if (parsed[k] === '') delete parsed[k]; });
       qeGridData = parsed;
-      // Write back the cleaned copy
-      try { localStorage.setItem(QE_GRID_KEY, JSON.stringify(qeGridData)); } catch(_) {}
     }
   } catch(e) {}
   try {
     const qe = localStorage.getItem(QE_EXP_KEY);
     if (qe) {
       const parsed = JSON.parse(qe);
-      Object.keys(parsed).forEach(k => { if (parsed[k] === '') delete parsed[k]; });
       qeExpenseGridData = parsed;
-      try { localStorage.setItem(QE_EXP_KEY, JSON.stringify(qeExpenseGridData)); } catch(_) {}
     }
   } catch(e) {}
   // Restore last-used view and all filters
@@ -568,6 +567,14 @@ function openEditClient(clientId) {
   scGroup.style.display = c.type==='Agency' ? '' : 'none';
   renderColorSwatches('editColorSwatches', editClientColor, 'setEditColor');
   renderEditSubclients();
+  // Set payment type toggle
+  const pt = c.paymentType || 'invoice';
+  const invBtn  = document.getElementById('editPayTypeInvoice');
+  const cashBtn = document.getElementById('editPayTypeCash');
+  if (invBtn && cashBtn) {
+    invBtn.classList.toggle('active',  pt === 'invoice');
+    cashBtn.classList.toggle('active', pt === 'cash');
+  }
   // Image preview
   const imgData = document.getElementById('editClientImgData');
   if (imgData) imgData.value = '';
@@ -608,12 +615,33 @@ function setEditColor(color) {
 }
 
 function renderEditSubclients() {
-  document.getElementById('editSubclientList').innerHTML = editClientSubclients.map((sc,i)=>`
+  const c = clientById(document.getElementById('editClientId').value);
+  const spts = (c && c.subclientPaymentTypes) ? c.subclientPaymentTypes : {};
+  document.getElementById('editSubclientList').innerHTML = editClientSubclients.map((sc,i)=>{
+    const pt = spts[sc] || 'invoice';
+    return `
     <div class="subclient-edit-row">
       <input type="text" class="form-input sc-edit-input" value="${sc}"
-        onchange="editClientSubclients[${i}]=this.value" style="flex:1;padding:8px 12px;font-size:14px" />
+        onchange="editClientSubclients[${i}]=this.value;renderEditSubclients()" style="flex:1;padding:8px 12px;font-size:14px" />
+      <div class="sc-pay-toggle">
+        <button class="sc-pay-btn ${pt==='invoice'?'active':''}" onclick="setSubclientPayType('${sc}','invoice',this)">INV</button>
+        <button class="sc-pay-btn ${pt==='cash'?'active':''}" onclick="setSubclientPayType('${sc}','cash',this)">CASH</button>
+      </div>
       <button class="btn-remove-sub" onclick="removeSubclientEdit(${i})"><i class="fa-solid fa-times"></i></button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+function setSubclientPayType(scName, pt, btn) {
+  const c = clientById(document.getElementById('editClientId').value);
+  if (!c) return;
+  if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
+  c.subclientPaymentTypes[scName] = pt;
+  // Update button states
+  const row = btn.closest('.subclient-edit-row');
+  row.querySelectorAll('.sc-pay-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  saveData();
 }
 
 function addSubclientToEdit() {
@@ -641,6 +669,11 @@ function saveClientEdit() {
   c.type       = editClientType;
   c.color      = editClientColor;
   c.subclients = editClientType==='Agency' ? editClientSubclients.filter(s=>s.trim()) : [];
+  const editPTInv  = document.getElementById('editPayTypeInvoice');
+  const editPTCash = document.getElementById('editPayTypeCash');
+  if (editPTInv && editPTCash) {
+    c.paymentType = editPTCash.classList.contains('active') ? 'cash' : 'invoice';
+  }
   const imgData = document.getElementById('editClientImgData')?.value;
   if (imgData) c.image = imgData;
   saveData();
@@ -761,6 +794,9 @@ function selectClient(clientId) {
   document.getElementById('clientDot').style.background   = c.color;
   document.getElementById('clientDropdown').classList.add('hidden');
 
+  // Auto-set payment type from client default
+  setPaymentType(c.paymentType || 'invoice');
+
   const subGroup = document.getElementById('subClientGroup');
   const subSel   = document.getElementById('incomeSubClient');
   if (c.type==='Agency' && c.subclients.length) {
@@ -769,6 +805,18 @@ function selectClient(clientId) {
     subGroup.classList.remove('hidden');
   } else {
     subGroup.classList.add('hidden');
+  }
+}
+
+function onSubClientChange(sel) {
+  const clientId = document.getElementById('incomeClientId').value;
+  const c = clientById(clientId);
+  if (!c) return;
+  const sub = sel.value;
+  if (sub && c.subclientPaymentTypes && c.subclientPaymentTypes[sub]) {
+    setPaymentType(c.subclientPaymentTypes[sub]);
+  } else {
+    setPaymentType(c.paymentType || 'invoice');
   }
 }
 
@@ -1322,8 +1370,12 @@ function captureQEGridData() {
   if (!table) return;
   table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
     const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+    const isNumeric = ['qty','price','subqty','subprice'].includes(inp.dataset.type);
     if (inp.value !== '') {
       qeGridData[key] = inp.value;
+    } else if (isNumeric) {
+      // Store empty sentinel so restoreQEGridData can override loadQEFromState for cleared cells
+      qeGridData[key] = '';
     } else {
       delete qeGridData[key];
     }
@@ -1688,6 +1740,7 @@ function updateQEClientTotal(inp) {
 function updateQEColTotals() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
+  const service = (qeGridService||'').trim();
   let grand = 0;
   table.querySelectorAll('.qe-tf-coltotal').forEach(foot=>{
     const cid = foot.dataset.client;
@@ -1695,6 +1748,19 @@ function updateQEColTotals() {
     table.querySelectorAll('.qe-client-total[data-client="'+cid+'"]').forEach(c=>{ col += parseFloat(c.dataset.value)||0; });
     foot.textContent = col > 0 ? fmt(col) : '—';
     grand += col;
+    // Color by payment status for this client
+    const clientEntries = state.income.filter(e =>
+      e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
+      (!service || e.service === service)
+    );
+    if (clientEntries.length) {
+      const hasPending = clientEntries.some(e => e.status === 'Pending');
+      foot.style.color      = hasPending ? '#f59e0b' : 'var(--green)';
+      foot.style.fontWeight = '700';
+    } else {
+      foot.style.color      = '';
+      foot.style.fontWeight = '';
+    }
   });
   const g = table.querySelector('.qe-tf-grand');
   if (g) g.textContent = grand > 0 ? fmt(grand) : '—';
@@ -1780,12 +1846,13 @@ function saveQEGrid() {
           const amount = Math.round(qty * effectivePrice * 100) / 100;
           // Upsert: update existing entry or create new
           const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||'') && e.service===service);
+          const cPayType = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
           if (xi >= 0) {
-            state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
+            state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus, paymentType:cPayType };
           } else {
             const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice, sharedPrice:price,
-              vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
-              paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
+              vatAmount:cPayType==='invoice'?amount*VAT_RATE:0,
+              paymentType:cPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
             state.income.push(entry); sheetsAdd('income',entry);
           }
           savedCount++; savedTotal += amount;
@@ -1798,18 +1865,48 @@ function saveQEGrid() {
         const amount = Math.round(qty * price * 100) / 100;
         if (amount <= 0) return;
         const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')=== '' && e.service===service);
+        const cPayType2 = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
         if (xi >= 0) {
-          state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:price, notes:subNote, vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus };
+          state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, status:qeGridStatus, paymentType:cPayType2 };
         } else {
           const entry = { id:genId(), clientId:cid, subClient:'', service, amount, qty, unitPrice:price,
-            vatAmount:qeGridPayType==='invoice'?amount*VAT_RATE:0,
-            paymentType:qeGridPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
+            vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0,
+            paymentType:cPayType2, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
           state.income.push(entry); sheetsAdd('income',entry);
         }
         savedCount++; savedTotal += amount;
       }
     });
   });
+  // Delete entries for cells that are now zero/empty (user cleared them)
+  const service2 = (qeGridService||'Video Editing').trim();
+  table.querySelectorAll('tbody tr').forEach(tr => {
+    const ds = tr.dataset.date;
+    const done3 = new Set();
+    tr.querySelectorAll('[data-type="price"]').forEach(priceInp => {
+      const cid2 = priceInp.dataset.client;
+      if (done3.has(cid2)) return; done3.add(cid2);
+      const subqtys2 = tr.querySelectorAll('[data-client="'+cid2+'"][data-type="subqty"]');
+      if (subqtys2.length > 0) {
+        subqtys2.forEach(sq2 => {
+          if ((parseFloat(sq2.value)||0) <= 0) {
+            const sub2 = sq2.dataset.sub;
+            state.income = state.income.filter(e =>
+              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && e.service===service2)
+            );
+          }
+        });
+      } else {
+        const qi2 = tr.querySelector('[data-client="'+cid2+'"][data-type="qty"]');
+        if ((parseFloat(qi2?.value)||0) <= 0 && (parseFloat(priceInp.value)||0) <= 0) {
+          state.income = state.income.filter(e =>
+            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')=== '' && e.service===service2)
+          );
+        }
+      }
+    });
+  });
+
   if (!savedCount) { showToast('No entries to save','error'); return; }
   saveData();
   showToast(savedCount+' entries saved — '+fmt(savedTotal));
@@ -2043,9 +2140,9 @@ function renderDashboard() {
   const totalExp  = exp.reduce((s,e)=>s+e.amount,0);
   const netProfit = collected-totalExp;
   document.getElementById('kpiGrid').innerHTML = `
-    <div class="kpi-card green"><div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div><div class="kpi-label">Collected</div><div class="kpi-value">${fmt(collected)}</div></div>
-    <div class="kpi-card amber"><div class="kpi-icon"><i class="fa-solid fa-clock"></i></div><div class="kpi-label">Pending</div><div class="kpi-value">${fmt(pending)}</div></div>
-    <div class="kpi-card red"><div class="kpi-icon"><i class="fa-solid fa-arrow-trend-down"></i></div><div class="kpi-label">Expenses</div><div class="kpi-value">${fmt(totalExp)}</div></div>
+    <div class="kpi-card green kpi-clickable" onclick="goToIncome('Paid')" title="Go to Income · Paid"><div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div><div class="kpi-label">Collected</div><div class="kpi-value">${fmt(collected)}</div></div>
+    <div class="kpi-card amber kpi-clickable" onclick="goToIncome('Pending')" title="Go to Income · Pending"><div class="kpi-icon"><i class="fa-solid fa-clock"></i></div><div class="kpi-label">Pending</div><div class="kpi-value">${fmt(pending)}</div></div>
+    <div class="kpi-card red kpi-clickable" onclick="navigate('expenses')" title="Go to Expenses"><div class="kpi-icon"><i class="fa-solid fa-arrow-trend-down"></i></div><div class="kpi-label">Expenses</div><div class="kpi-value">${fmt(totalExp)}</div></div>
     <div class="kpi-card blue"><div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div><div class="kpi-label">Net Profit</div><div class="kpi-value" style="color:${netProfit>=0?'var(--green)':'var(--red)'}">${fmt(netProfit)}</div></div>`;
 
   // Recurring prompt — show button if any recurring entries haven't been generated yet for current month
@@ -2119,6 +2216,13 @@ function renderMonthPills() {
   months.forEach(m=>{ html+=`<button class="month-pill ${dashMonth===m?'active':''}" onclick="setDashMonth('${m}')">${monthLabel(m)}</button>`; });
   if (!months.includes(cur)) html+=`<button class="month-pill ${dashMonth===cur?'active':''}" onclick="setDashMonth('${cur}')">${monthLabel(cur)}</button>`;
   document.getElementById('monthPills').innerHTML = html;
+}
+
+function goToIncome(status) {
+  incStatus = status;
+  incClient = 'all';
+  incMonth = 'all';
+  navigate('income');
 }
 
 function setDashMonth(m) { dashMonth=m; saveUIState(); renderDashboard(); }
@@ -2574,7 +2678,7 @@ function renderClients() {
       </button>
       <div class="client-card-avatar" style="${avatarStyle}">${avatarInner}</div>
       <div class="client-card-name">${c.name}</div>
-      <div class="client-card-type">${c.type==='Agency'?`Agency · ${c.subclients.length} sub-clients`:'Direct Client'}</div>
+      <div class="client-card-type">${c.type==='Agency'?`Agency · ${c.subclients.length} sub-clients`:'Direct Client'} · <span class="client-pay-badge ${c.paymentType||'invoice'}">${c.paymentType==='cash'?'Cash':'Invoice'}</span></div>
       <div class="client-card-stats">
         <div class="client-stat"><span class="client-stat-label">Total Earned</span><span class="client-stat-val green">${fmt(total)}</span></div>
         <div class="client-stat"><span class="client-stat-label">Jobs</span><span class="client-stat-val">${ci.length}</span></div>

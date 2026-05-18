@@ -237,7 +237,7 @@
       </div>
       <div class="form-group hidden" id="subClientGroup">
         <label class="form-label">Sub-Client</label>
-        <select class="form-select" id="incomeSubClient"><option value="">None / General</option></select>
+        <select class="form-select" id="incomeSubClient" onchange="onSubClientChange(this)"><option value="">None / General</option></select>
       </div>
       <div class="form-group">
         <label class="form-label">Service</label>
@@ -475,6 +475,13 @@
         <label class="form-label">Color</label>
         <div class="color-swatches" id="editColorSwatches"></div>
       </div>
+        <div class="form-group">
+          <label class="form-label">Default Payment Type</label>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn active" id="editPayTypeInvoice" onclick="document.getElementById('editPayTypeInvoice').classList.add('active');document.getElementById('editPayTypeCash').classList.remove('active')">Invoice</button>
+            <button type="button" class="toggle-btn" id="editPayTypeCash" onclick="document.getElementById('editPayTypeCash').classList.add('active');document.getElementById('editPayTypeInvoice').classList.remove('active')">Cash</button>
+          </div>
+        </div>
       <div class="form-group" id="editSubclientGroup">
         <label class="form-label">Sub-Clients</label>
         <div class="subclient-edit-list" id="editSubclientList"></div>

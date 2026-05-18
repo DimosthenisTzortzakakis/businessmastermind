@@ -399,6 +399,9 @@ a { text-decoration: none; color: inherit; }
 .kpi-label { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
 .kpi-value { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
 @media (max-width: 480px) { .kpi-value { font-size: 18px; } }
+.kpi-clickable { cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; }
+.kpi-clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+.kpi-clickable:active { transform: scale(0.97); }
 
 /* ============================================================
    VAT SUMMARY
@@ -782,6 +785,9 @@ a { text-decoration: none; color: inherit; }
   text-transform: uppercase; letter-spacing: 0.5px;
   margin-bottom: 12px;
 }
+.client-pay-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .4px; }
+.client-pay-badge.invoice { background: rgba(59,130,246,0.18); color: #60a5fa; }
+.client-pay-badge.cash    { background: rgba(34,197,94,0.18);  color: #4ade80; }
 .client-card-stats { display: flex; flex-direction: column; gap: 6px; }
 .client-stat { display: flex; justify-content: space-between; font-size: 12px; }
 .client-stat-label { color: var(--text-muted); }
@@ -1660,6 +1666,9 @@ a { text-decoration: none; color: inherit; }
   transition: var(--transition);
 }
 .btn-remove-sub:hover { background: var(--red); color: #fff; }
+.sc-pay-toggle { display: flex; gap: 3px; flex-shrink: 0; }
+.sc-pay-btn { padding: 4px 8px; font-size: 11px; font-weight: 700; border-radius: 5px; border: 1px solid var(--border); background: var(--bg-card2); color: var(--text-muted); cursor: pointer; }
+.sc-pay-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .subclient-add-row { display: flex; gap: 8px; align-items: center; }
 .btn-add-sub {
   display: flex; align-items: center; gap: 6px;
