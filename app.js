@@ -78,6 +78,7 @@ let incQtyMode = false;
 
 // Report filter
 let reportPayFilter = 'all';
+let reportSubMode   = 'separated'; // 'combined' | 'separated'
 
 // Quick entry tab
 let qeTab = 'income';
@@ -165,7 +166,7 @@ function saveUIState() {
       incMonth, incClient, incStatus, incPayType, incViewMode,
       expMonth, expCategory, expViewMode,
       qeTab, qeGridMonth, qeGridService, qeGridStatus, qeGridPayType,
-      qeGridSelectedClients, qeExpPayMethod, reportPayFilter
+      qeGridSelectedClients, qeExpPayMethod, reportPayFilter, reportSubMode
     }));
   } catch(e) {}
 }
@@ -192,6 +193,7 @@ function loadUIState() {
     if (s.qeGridPayType)         qeGridPayType         = s.qeGridPayType;
     if (s.qeExpPayMethod)        qeExpPayMethod        = s.qeExpPayMethod;
     if (s.reportPayFilter)       reportPayFilter       = s.reportPayFilter;
+    if (s.reportSubMode)         reportSubMode         = s.reportSubMode;
     if (Array.isArray(s.qeGridSelectedClients)) qeGridSelectedClients = s.qeGridSelectedClients;
   } catch(e) {}
 }
@@ -700,13 +702,57 @@ function deleteClientFromEdit() {
 function renderServices() {
   if (!state.services || !state.services.length) state.services = [...DEFAULT_SERVICES];
   const html = state.services.map((s,i)=>`
-    <div class="service-card">
+    <div class="service-card" id="svc-card-${i}">
       <div class="service-icon"><i class="fa-solid fa-briefcase"></i></div>
-      <div class="service-name">${s}</div>
+      <div class="service-name-wrap">
+        <span class="service-name" id="svc-name-${i}">${s}</span>
+        <input class="service-edit-inp hidden" id="svc-inp-${i}" value="${s.replace(/"/g,'&quot;')}"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();saveServiceEdit(${i});}if(event.key==='Escape')cancelServiceEdit(${i});"
+          onblur="saveServiceEdit(${i})" />
+      </div>
+      <button class="service-edit-btn" onclick="startServiceEdit(${i})" title="Rename"><i class="fa-solid fa-pen"></i></button>
       <button class="service-del-btn" onclick="deleteService(${i})" title="Remove"><i class="fa-solid fa-times"></i></button>
     </div>`).join('');
   document.getElementById('servicesGrid').innerHTML = html || '<div class="ov-empty">No services yet</div>';
   updateServicesDatalist();
+}
+
+function startServiceEdit(i) {
+  const span = document.getElementById('svc-name-'+i);
+  const inp  = document.getElementById('svc-inp-'+i);
+  if (!span || !inp) return;
+  span.classList.add('hidden');
+  inp.classList.remove('hidden');
+  inp.value = state.services[i];
+  inp.focus();
+  inp.select();
+}
+
+function saveServiceEdit(i) {
+  const inp = document.getElementById('svc-inp-'+i);
+  if (!inp) return;
+  const newName = inp.value.trim();
+  if (!newName) { cancelServiceEdit(i); return; }
+  const oldName = state.services[i];
+  if (newName === oldName) { cancelServiceEdit(i); return; }
+  if (state.services.some((s,j)=>j!==i && s.toLowerCase()===newName.toLowerCase())) {
+    showToast('Service name already exists','error');
+    cancelServiceEdit(i); return;
+  }
+  // Update all income entries using the old service name
+  let updated = 0;
+  state.income.forEach(e => { if (e.service === oldName) { e.service = newName; updated++; } });
+  state.services[i] = newName;
+  saveData();
+  renderServices();
+  showToast(`Renamed "${oldName}" → "${newName}"${updated?' ('+updated+' entries updated)':''}`);
+}
+
+function cancelServiceEdit(i) {
+  const span = document.getElementById('svc-name-'+i);
+  const inp  = document.getElementById('svc-inp-'+i);
+  if (span) span.classList.remove('hidden');
+  if (inp)  inp.classList.add('hidden');
 }
 
 function addService() {
@@ -2221,7 +2267,7 @@ function renderMonthPills() {
 function goToIncome(status) {
   incStatus = status;
   incClient = 'all';
-  incMonth = 'all';
+  incMonth  = todayVal().slice(0,7);
   navigate('income');
 }
 
@@ -2751,6 +2797,8 @@ function renderReports() {
       <button class="report-type-tab ${reportPayFilter==='all'?'active':''}" onclick="setReportPayFilter('all')"><i class="fa-solid fa-list"></i> All Jobs</button>
       <button class="report-type-tab cash-tab ${reportPayFilter==='cash'?'active':''}" onclick="setReportPayFilter('cash')"><i class="fa-solid fa-money-bill-wave"></i> Cash Only</button>
       <button class="report-type-tab invoice-tab ${reportPayFilter==='invoice'?'active':''}" onclick="setReportPayFilter('invoice')"><i class="fa-solid fa-file-invoice"></i> Invoice / VAT</button>
+      <button class="report-type-tab ${reportSubMode==='combined'?'active':''}" onclick="setReportSubMode('combined')"><i class="fa-solid fa-layer-group"></i> Combined</button>
+      <button class="report-type-tab ${reportSubMode==='separated'?'active':''}" onclick="setReportSubMode('separated')"><i class="fa-solid fa-list-ul"></i> Separated</button>
     </div>
     <div id="reportTableArea"><div class="report-empty">Select an agency client to view sub-client breakdown</div></div>`;
 }
@@ -2764,6 +2812,19 @@ function setReportPayFilter(f) {
   const tabs = document.querySelectorAll('.report-type-tab');
   if (tabs[idx]) tabs[idx].classList.add('active');
   renderReportTable();
+}
+
+function setReportSubMode(m) {
+  reportSubMode = m;
+  saveUIState();
+  renderReportTable();
+  // Refresh the tabs so active state updates in the already-rendered controls
+  // (the report controls are part of the pre-rendered DOM, re-render them)
+  document.querySelectorAll('.report-type-tab').forEach(btn => {
+    const txt = btn.textContent.trim();
+    if (txt.includes('Combined')) btn.classList.toggle('active', m === 'combined');
+    if (txt.includes('Separated')) btn.classList.toggle('active', m === 'separated');
+  });
 }
 
 function renderReportTable() {
@@ -2825,21 +2886,64 @@ function renderReportTable() {
 
   const filterLabel = reportPayFilter==='cash' ? ' — Cash Jobs' : reportPayFilter==='invoice' ? ' — Invoice (VAT) Jobs' : '';
   const client = clientById(clientId);
-
-  const scMap={};
-  entries.forEach(e=>{
-    const k=e.subClient||'(General)';
-    if(!scMap[k])scMap[k]={paid:0,pending:0,jobs:0,vat:0,cashJobs:0,invoiceJobs:0};
-    scMap[k].jobs++; scMap[k].vat+=(e.vatAmount||0);
-    if(e.paymentType==='cash') scMap[k].cashJobs++; else scMap[k].invoiceJobs++;
-    if(e.status==='Paid')    scMap[k].paid+=e.amount;
-    if(e.status==='Pending') scMap[k].pending+=e.amount;
-  });
   const gPaid=entries.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
   const gPend=entries.filter(e=>e.status==='Pending').reduce((s,e)=>s+e.amount,0);
   const gVAT=entries.reduce((s,e)=>s+(e.vatAmount||0),0);
   const showVAT = reportPayFilter!=='cash';
+  const gTotal = gPaid + gPend + gVAT;
 
+  // SEPARATED: one row per entry with all details
+  if (reportSubMode === 'separated') {
+    const sorted = [...entries].sort((a,b)=>b.date.localeCompare(a.date));
+    const rows = sorted.map(e => {
+      const sl = e.status.toLowerCase();
+      const vat = e.vatAmount || 0;
+      const total = e.amount + vat;
+      return `<tr class="rpt-${sl}">
+        <td>${toDateStr(e.date)}</td>
+        <td>${e.subClient||'—'}</td>
+        <td>${e.service}</td>
+        <td style="text-align:right">${fmt(e.amount)}</td>
+        ${showVAT?`<td style="text-align:right;color:var(--text-muted)">${vat>0?fmt(vat)+'<span class="rpt-vat-tag">+VAT</span>':'—'}</td>`:''}
+        <td style="text-align:right;font-weight:700">${fmt(total)}</td>
+        <td><span class="badge ${sl} mini">${e.status}</span></td>
+      </tr>`;
+    }).join('');
+    area.innerHTML = `<div class="report-table-wrapper" id="printArea">
+      <div style="padding:16px 16px 8px;font-size:13px;color:var(--text-muted)">
+        <strong style="color:var(--text)">${client?.name||''}</strong>${filterLabel}${month?` · ${monthLabel(month)}`:''}
+        <span style="margin-left:12px;font-size:11px;opacity:.7">${entries.length} entries</span>
+      </div>
+      <table class="report-table">
+        <thead><tr>
+          <th>Date</th><th>Sub-Client</th><th>Service</th><th style="text-align:right">Amount</th>
+          ${showVAT?'<th style="text-align:right">VAT</th>':''}
+          <th style="text-align:right">Total</th><th>Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr class="total-row">
+          <td colspan="3">TOTAL</td>
+          <td style="text-align:right">${fmt(gPaid+gPend)}</td>
+          ${showVAT?`<td style="text-align:right">${fmt(gVAT)}</td>`:''}
+          <td style="text-align:right">${fmt(gTotal)}</td>
+          <td></td>
+        </tr></tfoot>
+      </table>
+    </div>`;
+    return;
+  }
+
+  // COMBINED: grouped by subclient, summary rows
+  const scMap={};
+  entries.forEach(e=>{
+    const k=e.subClient||'(General)';
+    if(!scMap[k])scMap[k]={paid:0,pending:0,jobs:0,vat:0,total:0};
+    scMap[k].jobs++;
+    scMap[k].vat += (e.vatAmount||0);
+    scMap[k].total += e.amount + (e.vatAmount||0);
+    if(e.status==='Paid')    scMap[k].paid+=e.amount;
+    if(e.status==='Pending') scMap[k].pending+=e.amount;
+  });
   area.innerHTML=`<div class="report-table-wrapper" id="printArea">
     <div style="padding:16px 16px 8px;font-size:13px;color:var(--text-muted)">
       <strong style="color:var(--text)">${client?.name||''}</strong>${filterLabel}
@@ -2847,22 +2951,23 @@ function renderReportTable() {
     </div>
     <table class="report-table"><thead><tr>
       <th>Sub-Client</th><th>Jobs</th>
-      ${reportPayFilter==='all'?'<th>Cash</th><th>Invoice</th>':''}
-      <th>Paid</th><th>Pending</th>
-      ${showVAT?'<th>VAT</th>':''}
+      <th style="text-align:right">Paid</th><th style="text-align:right">Pending</th>
+      ${showVAT?'<th style="text-align:right">VAT</th>':''}
+      <th style="text-align:right">Total</th>
     </tr></thead>
     <tbody>${Object.entries(scMap).map(([sc,d])=>`<tr>
       <td>${sc}</td><td>${d.jobs}</td>
-      ${reportPayFilter==='all'?`<td>${d.cashJobs||'—'}</td><td>${d.invoiceJobs||'—'}</td>`:''}
-      <td style="color:var(--green)">${fmt(d.paid)}</td>
-      <td style="color:var(--amber)">${d.pending>0?fmt(d.pending):'—'}</td>
-      ${showVAT?`<td>${fmt(d.vat)}</td>`:''}
+      <td style="text-align:right;color:var(--green)">${fmt(d.paid)}</td>
+      <td style="text-align:right;color:var(--amber)">${d.pending>0?fmt(d.pending):'—'}</td>
+      ${showVAT?`<td style="text-align:right;color:var(--text-muted)">${d.vat>0?fmt(d.vat):'—'}</td>`:''}
+      <td style="text-align:right;font-weight:700">${fmt(d.total)}</td>
     </tr>`).join('')}</tbody>
     <tfoot><tr class="total-row">
       <td>TOTAL</td><td>${entries.length}</td>
-      ${reportPayFilter==='all'?`<td>${entries.filter(e=>e.paymentType==='cash').length}</td><td>${entries.filter(e=>e.paymentType==='invoice').length}</td>`:''}
-      <td>${fmt(gPaid)}</td><td>${gPend>0?fmt(gPend):'—'}</td>
-      ${showVAT?`<td>${fmt(gVAT)}</td>`:''}
+      <td style="text-align:right">${fmt(gPaid)}</td>
+      <td style="text-align:right">${gPend>0?fmt(gPend):'—'}</td>
+      ${showVAT?`<td style="text-align:right">${fmt(gVAT)}</td>`:''}
+      <td style="text-align:right">${fmt(gTotal)}</td>
     </tr></tfoot>
     </table></div>`;
 }
@@ -3448,6 +3553,76 @@ async function autoPullForced() {
 }
 
 // ── Export / Import ────────────────────────────────────────────
+function exportAllToExcel() {
+  if (typeof XLSX === 'undefined') { showToast('Excel library not loaded','error'); return; }
+  const wb = XLSX.utils.book_new();
+
+  // ── Sheet 1: Income ────────────────────────────────────────────
+  const incRows = [['Date','Client','Sub-Client','Service','Amount (€)','VAT (€)','Total (€)','Status','Payment Type']];
+  [...state.income].sort((a,b)=>b.date.localeCompare(a.date)).forEach(e=>{
+    const c = clientById(e.clientId);
+    const vat = e.vatAmount||0;
+    incRows.push([e.date, c?.name||'?', e.subClient||'', e.service,
+      e.amount, vat, e.amount+vat, e.status, e.paymentType==='invoice'?'Invoice':'Cash']);
+  });
+  const wsInc = XLSX.utils.aoa_to_sheet(incRows);
+  wsInc['!cols'] = [{wch:12},{wch:20},{wch:18},{wch:24},{wch:12},{wch:10},{wch:12},{wch:10},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, wsInc, 'Income');
+
+  // ── Sheet 2: Expenses ──────────────────────────────────────────
+  const expRows = [['Date','Category','Type','Amount (€)','VAT (€)','Payment Method','Recurring']];
+  [...state.expenses].sort((a,b)=>b.date.localeCompare(a.date)).forEach(e=>{
+    expRows.push([e.date, e.category, e.vendor||'', e.amount, e.vatAmount||0, e.paymentMethod||'', e.recurring?'Yes':'No']);
+  });
+  const wsExp = XLSX.utils.aoa_to_sheet(expRows);
+  wsExp['!cols'] = [{wch:12},{wch:22},{wch:20},{wch:12},{wch:10},{wch:16},{wch:10}];
+  XLSX.utils.book_append_sheet(wb, wsExp, 'Expenses');
+
+  // ── Sheet 3: Income by Client ──────────────────────────────────
+  const cRows = [['Client','Total Paid (€)','Total Pending (€)','VAT (€)','Net Total (€)','Jobs']];
+  state.clients.forEach(c=>{
+    const ci = state.income.filter(e=>e.clientId===c.id);
+    if (!ci.length) return;
+    const paid = ci.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
+    const pend = ci.filter(e=>e.status==='Pending').reduce((s,e)=>s+e.amount,0);
+    const vat  = ci.reduce((s,e)=>s+(e.vatAmount||0),0);
+    cRows.push([c.name, paid, pend, vat, paid+pend+vat, ci.length]);
+  });
+  const wsCli = XLSX.utils.aoa_to_sheet(cRows);
+  wsCli['!cols'] = [{wch:22},{wch:16},{wch:16},{wch:12},{wch:14},{wch:8}];
+  XLSX.utils.book_append_sheet(wb, wsCli, 'By Client');
+
+  // ── Sheet 4: Expenses by Category ─────────────────────────────
+  const catMap = {};
+  state.expenses.forEach(e=>{ catMap[e.category]=(catMap[e.category]||0)+e.amount; });
+  const catRows = [['Category','Total (€)']];
+  Object.entries(catMap).sort((a,b)=>b[1]-a[1]).forEach(([k,v])=>catRows.push([k,v]));
+  const wsCat = XLSX.utils.aoa_to_sheet(catRows);
+  wsCat['!cols'] = [{wch:28},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, wsCat, 'By Category');
+
+  // ── Sheet 5: Monthly Summary ───────────────────────────────────
+  const allMonthsSet = new Set([...state.income.map(e=>monthKey(e.date)), ...state.expenses.map(e=>monthKey(e.date))]);
+  const monthsSorted = [...allMonthsSet].sort((a,b)=>b.localeCompare(a));
+  const sumRows = [['Month','Income Paid (€)','Income Pending (€)','Expenses (€)','Net Profit (€)','VAT Due (€)']];
+  monthsSorted.forEach(m=>{
+    const mInc = state.income.filter(e=>monthKey(e.date)===m);
+    const mExp = state.expenses.filter(e=>monthKey(e.date)===m);
+    const paid = mInc.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
+    const pend = mInc.filter(e=>e.status==='Pending').reduce((s,e)=>s+e.amount,0);
+    const exp  = mExp.reduce((s,e)=>s+e.amount,0);
+    const vat  = mInc.filter(e=>e.status==='Paid'&&e.paymentType==='invoice').reduce((s,e)=>s+(e.vatAmount||0),0)
+               - mExp.reduce((s,e)=>s+(e.vatAmount||0),0);
+    sumRows.push([m, paid, pend, exp, paid-exp, vat]);
+  });
+  const wsSum = XLSX.utils.aoa_to_sheet(sumRows);
+  wsSum['!cols'] = [{wch:10},{wch:16},{wch:16},{wch:14},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, wsSum, 'Monthly Summary');
+
+  XLSX.writeFile(wb, 'BusinessMastermind_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  showToast('Excel file downloaded');
+}
+
 function exportData() {
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -3474,6 +3649,9 @@ function importData(ev) {
 // ── Init ───────────────────────────────────────────────────────
 function init() {
   loadData();
+  // Always start income/expense tabs on current month (override UIState)
+  incMonth  = todayVal().slice(0,7);
+  expMonth  = todayVal().slice(0,7);
   generateRecurring(true); // auto-generate on load, silent if nothing new
   updateServicesDatalist();
   document.getElementById('incomeDate').value  = todayVal();
