@@ -87,7 +87,7 @@ let qeTab = 'income';
 let qeGridMonth = '';
 let qeGridSelectedClients = [];
 let qeGridService = 'Video Editing';
-let qeGridStatus = 'Paid';
+let qeGridStatus = 'Pending';
 let qeGridPayType = 'cash';
 let qeGridData = {}; // persistent grid state: key = "type|clientId|date|sub", value = string
 let qeExpenseGridData = {}; // expense QE: { date: [{id,category,amount,note}] }
@@ -1643,7 +1643,7 @@ function renderQEIncome(cont) {
   }).join('');
 
   // Footer
-  const footCells = selCols.map(c=>'<td colspan="'+clientColCount(c)+'" class="qe-tf-coltotal" data-client="'+c.id+'">—</td>').join('');
+  const footCells = selCols.map(c=>'<td colspan="'+clientColCount(c)+'" class="qe-tf-coltotal qe-tf-coltotal-click" data-client="'+c.id+'" onclick="toggleQEClientStatus(\''+c.id+'\')" title="Tap to toggle all Paid/Pending for this client">—</td>').join('');
 
   cont.innerHTML = `
     <div class="qe-grid-controls">
@@ -1731,6 +1731,39 @@ function toggleQERowStatus(dateStr) {
   showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
 }
 
+// Get combined status for all entries of a client in current QE month/service
+function getQEClientStatus(cid) {
+  const service = (qeGridService || '').trim();
+  const entries = state.income.filter(e =>
+    e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
+    (!service || e.service === service)
+  );
+  if (!entries.length) return null;
+  return entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
+}
+
+// Toggle ALL saved entries for a client (entire month) between Paid and Pending
+function toggleQEClientStatus(cid) {
+  const service = (qeGridService || '').trim();
+  const entries = state.income.filter(e =>
+    e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
+    (!service || e.service === service)
+  );
+  if (!entries.length) { showToast('No saved entries for this client yet','error'); return; }
+  const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
+  const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
+  entries.forEach(e => { e.status = newStatus; });
+  saveData();
+  // Refresh all day-total colors for the affected dates
+  const affectedDates = new Set(entries.map(e => e.date));
+  affectedDates.forEach(dateStr => {
+    const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
+    if (cell) applyQETotalColor(cell, getQERowStatus(dateStr));
+  });
+  updateQEColTotals();
+  showToast(newStatus === 'Paid' ? '✓ All entries marked Paid' : '⏳ All entries marked Pending');
+}
+
 // Apply color to a .qe-td-total cell based on status
 function applyQETotalColor(cell, status) {
   if (status === 'Paid') {
@@ -1779,7 +1812,10 @@ function updateQEClientTotal(inp) {
   if (dt) {
     dt.textContent = dayTotal > 0 ? fmt(dayTotal) : '—';
     const rowStatus = getQERowStatus(inp.dataset.date || tr.dataset.date);
-    applyQETotalColor(dt, rowStatus);
+    // If no saved entry yet but there's a draft value, use qeGridStatus for coloring
+    // (defaults to Pending = orange)
+    const colorStatus = rowStatus !== null ? rowStatus : (dayTotal > 0 ? qeGridStatus : null);
+    applyQETotalColor(dt, colorStatus);
   }
   updateQEColTotals();
 }
@@ -1796,13 +1832,13 @@ function updateQEColTotals() {
     foot.textContent = col > 0 ? fmt(col) : '—';
     grand += col;
     // Color by payment status for this client
-    const clientEntries = state.income.filter(e =>
-      e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
-      (!service || e.service === service)
-    );
-    if (clientEntries.length) {
-      const hasPending = clientEntries.some(e => e.status === 'Pending');
-      foot.style.color      = hasPending ? '#f59e0b' : 'var(--green)';
+    const clientStatus = getQEClientStatus(cid);
+    if (clientStatus) {
+      foot.style.color      = clientStatus === 'Pending' ? '#f59e0b' : 'var(--green)';
+      foot.style.fontWeight = '700';
+    } else if (col > 0) {
+      // Has draft (unsaved) values — show orange by default
+      foot.style.color      = '#f59e0b';
       foot.style.fontWeight = '700';
     } else {
       foot.style.color      = '';

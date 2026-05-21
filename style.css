@@ -2573,6 +2573,14 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   padding: 6px 10px !important;
 }
 .qe-td-total, .qe-tf-grand { border-left: 1px solid rgba(255,255,255,0.1) !important; }
+.qe-tf-coltotal-click {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: opacity 0.15s;
+}
+.qe-tf-coltotal-click:hover { opacity: 0.75; }
+.qe-tf-coltotal-click:active { opacity: 0.5; }
 .qe-td-total-click {
   cursor: pointer;
   user-select: none;
