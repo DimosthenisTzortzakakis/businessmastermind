@@ -212,9 +212,10 @@ function saveData() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       } catch(e2) {
-        // localStorage still full — push to Firebase so data isn't lost
-        scheduleAutoPush();
-        return; // don't throw — data is in memory and being pushed to cloud
+        // localStorage still full even after clearing caches — throw so caller
+        // can roll back the entry and show an error. Data must NOT silently stay
+        // only in memory (refresh = data loss).
+        throw new Error('STORAGE_FULL');
       }
     } else {
       throw e;
@@ -1954,7 +1955,12 @@ function saveQEGrid() {
   });
 
   if (!savedCount) { showToast('No entries to save','error'); return; }
-  saveData();
+  try {
+    saveData();
+  } catch(e) {
+    showPersistentError('❌ Could not save QE — storage full. Export data first then clear space.');
+    return;
+  }
   showToast(savedCount+' entries saved — '+fmt(savedTotal));
   // Keep all values visible — do NOT clear the grid
 }
@@ -3367,11 +3373,9 @@ async function autoPull(silent) {
     const localTs      = state.lastModified || 0;
     const cloudIncome   = p.income   || [];
     const cloudExpenses = p.expenses || [];
-    const cloudEntries  = cloudIncome.length + cloudExpenses.length;
-    const localEntries  = (state.income?.length || 0) + (state.expenses?.length || 0);
 
-    // Skip if local is strictly newer AND has at least as many entries
-    if (cloudTs <= localTs && cloudEntries <= localEntries) {
+    // Skip only if cloud is strictly older than local — we have newer data
+    if (cloudTs > 0 && cloudTs < localTs) {
       setSyncIndicator('ok');
       setTimeout(() => setSyncIndicator('idle'), 2000);
       return;
@@ -3535,12 +3539,21 @@ async function autoPullForced() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
+    // ALWAYS merge — never blindly overwrite local data
+    const cloudIncome   = p.income   || [];
+    const cloudExpenses = p.expenses || [];
+    const cloudIncomeIds  = new Set(cloudIncome.map(e => e.id));
+    const cloudExpenseIds = new Set(cloudExpenses.map(e => e.id));
+    const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id));
+    const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id));
     state.clients  = p.clients;
-    state.income   = p.income   || [];
-    state.expenses = p.expenses || [];
+    state.income   = [...cloudIncome,   ...localOnlyIncome];
+    state.expenses = [...cloudExpenses, ...localOnlyExpense];
     state.services = p.services || [...DEFAULT_SERVICES];
-    state.lastModified = p.lastModified || Date.now();
+    state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // Push merged result back if we had local-only entries
+    if (localOnlyIncome.length || localOnlyExpense.length) scheduleAutoPush();
     navigate(currentView);
     setSyncIndicator('ok');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
