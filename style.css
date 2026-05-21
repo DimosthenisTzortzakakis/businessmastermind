@@ -2589,6 +2589,14 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 .qe-td-total-click:hover { opacity: 0.75; }
 .qe-td-total-click:active { opacity: 0.5; }
+.qe-client-total-click {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: opacity 0.15s;
+}
+.qe-client-total-click:hover { opacity: 0.75; }
+.qe-client-total-click:active { opacity: 0.5; }
 .qe-sp-tfoot { background: var(--bg-sidebar); border-top: 2px solid var(--border); }
 .qe-tf-label {
   font-size: 10px;

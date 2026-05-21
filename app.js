@@ -80,6 +80,10 @@ let incQtyMode = false;
 let reportPayFilter = 'all';
 let reportSubMode   = 'separated'; // 'combined' | 'separated'
 
+// Print options dialog
+let _printSubMode   = 'separated';
+let _printPayFilter = 'all';
+
 // Quick entry tab
 let qeTab = 'income';
 
@@ -1549,6 +1553,19 @@ function restoreQEGridData() {
     const status = getQERowStatus(cell.dataset.date);
     applyQETotalColor(cell, status);
   });
+  // Color per-client-per-day total cells
+  document.querySelectorAll('.qe-client-total[data-client][data-date]').forEach(ct => {
+    const cid = ct.dataset.client; const ds = ct.dataset.date;
+    const service = (qeGridService||'').trim();
+    const entries = state.income.filter(e =>
+      e.clientId===cid && e.date===ds && (!service||e.service===service)
+    );
+    if (!entries.length) return;
+    const hasPending = entries.some(e=>e.status==='Pending');
+    ct.style.color      = hasPending ? '#f59e0b' : 'var(--green)';
+    ct.style.fontWeight = '700';
+    ct.title = hasPending ? 'Pending — tap to mark Paid' : 'Paid — tap to mark Pending';
+  });
 }
 
 function renderQEIncome(cont) {
@@ -1623,7 +1640,7 @@ function renderQEIncome(cont) {
         }).join('');
         return subCells
           +'<td class="qe-td-n" style="background:'+bg+';text-align:center;vertical-align:middle"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
-          +'<td class="qe-client-total" style="background:'+bg+'" data-client="'+c.id+'" data-date="'+ds+'" data-value="0">—</td>';
+          +'<td class="qe-client-total qe-client-total-click" style="background:'+bg+'" data-client="'+c.id+'" data-date="'+ds+'" data-value="0" onclick="toggleQEClientDayStatus(\''+c.id+'\',\''+ds+'\')" title="Tap to toggle Paid/Pending">—</td>';
       } else {
         // Direct: qty (with note) + price + total
         return '<td class="qe-td-n" style="border-left:2px solid '+c.color+';background:'+bg+';text-align:center;vertical-align:middle">'
@@ -1633,7 +1650,7 @@ function renderQEIncome(cont) {
           +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="note…" data-client="'+c.id+'" data-date="'+ds+'" data-type="subnote" style="display:none" onblur="qeSubNoteBlur(this)" />'
           +'</div></td>'
           +'<td class="qe-td-n" style="background:'+bg+';text-align:center;vertical-align:middle"><input class="qe-sp-inp qe-sp-price" type="number" placeholder="—" min="0" step="0.01" data-client="'+c.id+'" data-date="'+ds+'" data-type="price" oninput="updateQEClientTotal(this)" onkeydown="qeSpreadsheetNav(event,this)" /></td>'
-          +'<td class="qe-client-total" style="background:'+bg+'" data-client="'+c.id+'" data-date="'+ds+'" data-value="0">—</td>';
+          +'<td class="qe-client-total qe-client-total-click" style="background:'+bg+'" data-client="'+c.id+'" data-date="'+ds+'" data-value="0" onclick="toggleQEClientDayStatus(\''+c.id+'\',\''+ds+'\')" title="Tap to toggle Paid/Pending">—</td>';
       }
     }).join('');
     return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+ds+'">'
@@ -1728,6 +1745,32 @@ function toggleQERowStatus(dateStr) {
   const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
   if (cell) applyQETotalColor(cell, newStatus);
   // Show brief toast
+  showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
+}
+
+// Toggle a single client's entries for one specific day
+function toggleQEClientDayStatus(cid, dateStr) {
+  const service = (qeGridService || '').trim();
+  const entries = state.income.filter(e =>
+    e.clientId === cid && e.date === dateStr &&
+    (!service || e.service === service)
+  );
+  if (!entries.length) return; // nothing saved yet
+  const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
+  const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
+  entries.forEach(e => { e.status = newStatus; });
+  saveData();
+  // Update this client total cell color
+  const ct = document.querySelector('.qe-client-total[data-client="'+cid+'"][data-date="'+dateStr+'"]');
+  if (ct) {
+    ct.style.color      = newStatus === 'Paid' ? 'var(--green)' : '#f59e0b';
+    ct.style.fontWeight = '700';
+    ct.title = newStatus === 'Paid' ? 'Paid — tap to mark Pending' : 'Pending — tap to mark Paid';
+  }
+  // Update day total
+  const dt = document.querySelector('.qe-td-total[data-date="'+dateStr+'"]');
+  if (dt) applyQETotalColor(dt, getQERowStatus(dateStr));
+  updateQEColTotals();
   showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
 }
 
@@ -2034,6 +2077,8 @@ function captureQEExpGridData() {
     const cat  = slotEl.querySelector('[data-type="expcategory"]')?.value||'';
     const amt  = slotEl.querySelector('[data-type="expamount"]');
     const note = slotEl.querySelector('[data-type="expnote"]')?.value||'';
+    // Only save slots that have at least a category or an amount (skip empty trailing slots)
+    if (!cat && !(amt?.value||'')) return;
     if (!qeExpenseGridData[ds]) qeExpenseGridData[ds]=[];
     qeExpenseGridData[ds].push({ id:amt?.dataset.entryId||'', category:cat, amount:amt?.value||'', note });
   });
@@ -2148,7 +2193,15 @@ function renderQEExpense(cont) {
 function addQEExpSlot(dateStr) {
   const cont = document.getElementById('qe-slots-'+dateStr);
   if (!cont) return;
-  const si = cont.querySelectorAll('.qe-exp-slot').length;
+  // Only add if the last existing slot has at least a category or amount
+  const slots = cont.querySelectorAll('.qe-exp-slot');
+  if (slots.length > 0) {
+    const last = slots[slots.length - 1];
+    const lastCat = last.querySelector('[data-type="expcategory"]')?.value || '';
+    const lastAmt = last.querySelector('[data-type="expamount"]')?.value || '';
+    if (!lastCat && !lastAmt) return; // last slot is still empty, don't add another
+  }
+  const si = slots.length;
   cont.insertAdjacentHTML('beforeend', renderQEExpSlotHTML(dateStr,{id:'',category:'',amount:'',note:''},si));
 }
 
@@ -2553,7 +2606,7 @@ function renderIncome() {
   entries.forEach(e=>{ const k=monthKey(e.date); if(!groups[k])groups[k]=[]; groups[k].push(e); });
 
   Object.keys(groups).sort((a,b)=>b.localeCompare(a)).forEach(key=>{
-    const grp=groups[key];
+    const grp=[...groups[key]].sort((a,b)=>a.date.localeCompare(b.date)); // day 1 first within month
     const total=grp.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
     html+=`<div class="month-group"><div class="month-group-header"><span>${monthLabel(key)}</span><span class="month-group-total">${fmt(total)}</span></div>`;
 
@@ -2702,7 +2755,7 @@ function renderExpenses() {
   entries.forEach(e=>{ const k=monthKey(e.date); if(!groups[k])groups[k]=[]; groups[k].push(e); });
 
   Object.keys(groups).sort((a,b)=>b.localeCompare(a)).forEach(key=>{
-    const grp=groups[key];
+    const grp=[...groups[key]].sort((a,b)=>a.date.localeCompare(b.date)); // day 1 first within month
     const total=grp.reduce((s,e)=>s+e.amount,0);
     html+=`<div class="month-group"><div class="month-group-header"><span>${monthLabel(key)}</span><span style="color:var(--red);font-size:13px;font-weight:700">${fmt(total)}</span></div>`;
 
@@ -3014,141 +3067,206 @@ function renderReportTable() {
     </table></div>`;
 }
 
-// ── Print Report ───────────────────────────────────────────────
+// ── Print Options Dialog ────────────────────────────────────────
 function printReport() {
   const clientId = document.getElementById('reportClient')?.value;
   const month    = document.getElementById('reportMonth')?.value;
   if (!clientId) { showToast('Select a client first','error'); return; }
+  showPrintOptionsDialog(clientId, month);
+}
 
-  // ── All My Income ──────────────────────────────────────────────
-  if (clientId==='__all__') {
-    let entries = [...state.income];
-    if (month) entries=entries.filter(e=>monthKey(e.date)===month);
-    if (reportPayFilter!=='all') entries=entries.filter(e=>e.paymentType===reportPayFilter);
-    if (!entries.length) { showToast('No entries to print','error'); return; }
-    const showVAT=reportPayFilter!=='cash', showCI=reportPayFilter==='all';
-    const cMap={};
+function showPrintOptionsDialog(clientId, month) {
+  let dlg = document.getElementById('printOptionsDialog');
+  if (!dlg) {
+    dlg = document.createElement('div');
+    dlg.id = 'printOptionsDialog';
+    dlg.className = 'copy-dialog';
+    dlg.innerHTML = `
+      <h3><i class="fa-solid fa-print"></i> Print Options</h3>
+      <p id="printOptsMeta"></p>
+      <div style="margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Sub-client Layout</div>
+        <div style="display:flex;gap:8px" id="printSubModeToggle">
+          <button class="report-type-tab active" data-mode="separated" onclick="setPrintSubMode('separated')"><i class="fa-solid fa-list-ul"></i> Separated</button>
+          <button class="report-type-tab" data-mode="combined" onclick="setPrintSubMode('combined')"><i class="fa-solid fa-layer-group"></i> Combined</button>
+        </div>
+      </div>
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Payment Filter</div>
+        <div style="display:flex;gap:8px" id="printPayFilterToggle">
+          <button class="report-type-tab active" data-pf="all" onclick="setPrintPayFilter('all')">All</button>
+          <button class="report-type-tab invoice-tab" data-pf="invoice" onclick="setPrintPayFilter('invoice')"><i class="fa-solid fa-file-invoice"></i> Invoice</button>
+          <button class="report-type-tab cash-tab" data-pf="cash" onclick="setPrintPayFilter('cash')"><i class="fa-solid fa-money-bill"></i> Cash</button>
+        </div>
+      </div>
+      <div class="copy-dialog-btns">
+        <button class="btn-cancel" onclick="closePrintOptionsDialog()">Cancel</button>
+        <button class="btn-save" style="flex:1;padding:10px" onclick="confirmPrintReport()"><i class="fa-solid fa-print"></i> Print</button>
+      </div>`;
+    document.body.appendChild(dlg);
+    document.getElementById('modalOverlay').addEventListener('click', closePrintOptionsDialog);
+  }
+  dlg.dataset.clientId = clientId;
+  dlg.dataset.month = month || '';
+  const client = clientById(clientId);
+  document.getElementById('printOptsMeta').textContent =
+    (clientId==='__all__' ? 'All Clients' : (client?.name||'')) +
+    (month ? ' · '+monthLabel(month) : '');
+  _printSubMode = 'separated';
+  _printPayFilter = reportPayFilter || 'all';
+  document.querySelectorAll('#printSubModeToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.mode===_printSubMode));
+  document.querySelectorAll('#printPayFilterToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.pf===_printPayFilter));
+  document.getElementById('modalOverlay').classList.remove('hidden');
+  requestAnimationFrame(()=>requestAnimationFrame(()=>dlg.classList.add('open')));
+}
+
+function setPrintSubMode(m) {
+  _printSubMode = m;
+  document.querySelectorAll('#printSubModeToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+}
+
+function setPrintPayFilter(pf) {
+  _printPayFilter = pf;
+  document.querySelectorAll('#printPayFilterToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.pf===pf));
+}
+
+function closePrintOptionsDialog() {
+  const dlg = document.getElementById('printOptionsDialog');
+  if (dlg) dlg.classList.remove('open');
+  if (!activeSheet) document.getElementById('modalOverlay').classList.add('hidden');
+}
+
+function confirmPrintReport() {
+  const dlg = document.getElementById('printOptionsDialog');
+  if (!dlg) return;
+  const clientId = dlg.dataset.clientId;
+  const month    = dlg.dataset.month || '';
+  closePrintOptionsDialog();
+  executePrintReport(clientId, month, _printSubMode, _printPayFilter);
+}
+
+function executePrintReport(clientId, month, subMode, payFilter) {
+  let entries = clientId==='__all__' ? [...state.income] : state.income.filter(e=>e.clientId===clientId);
+  if (month) entries = entries.filter(e=>monthKey(e.date)===month);
+  if (payFilter!=='all') entries = entries.filter(e=>e.paymentType===payFilter);
+  if (!entries.length) { showToast('No entries to print','error'); return; }
+  entries.sort((a,b)=>a.date.localeCompare(b.date));
+
+  const isAll = clientId==='__all__';
+  const client = isAll ? null : clientById(clientId);
+  const title = isAll ? 'All Income' : (client?.name||'Report');
+  const filterLabel = payFilter==='cash' ? ' — Cash Only' : payFilter==='invoice' ? ' — Invoice / VAT' : '';
+  const monthStr = month ? ' · '+monthLabel(month) : '';
+  const showVAT = payFilter!=='cash';
+  const fd = d => { const [y,mo,dy]=d.split('-'); return `${dy}/${mo}/${y}`; };
+  const ef = n => '€'+(Math.round(n*100)/100).toFixed(2);
+
+  let bodyHtml = '';
+
+  if (subMode==='separated') {
+    // Group by client (if __all__) or subclient (if specific client)
+    const groups={}, keys=[];
     entries.forEach(e=>{
-      const c=clientById(e.clientId); const k=c?.name||'Unknown';
-      if(!cMap[k])cMap[k]={paid:0,pending:0,jobs:0,vat:0,cashJobs:0,invoiceJobs:0,color:c?.color||'#888'};
-      cMap[k].jobs++; cMap[k].vat+=(e.vatAmount||0);
-      if(e.paymentType==='cash')cMap[k].cashJobs++; else cMap[k].invoiceJobs++;
-      if(e.status==='Paid')cMap[k].paid+=e.amount;
-      if(e.status==='Pending')cMap[k].pending+=e.amount;
+      const key = isAll ? (clientById(e.clientId)?.name||'Unknown') : (e.subClient||'(General)');
+      if (!groups[key]) { groups[key]=[]; keys.push(key); }
+      groups[key].push(e);
     });
-    const gPaid=entries.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
-    const gPend=entries.filter(e=>e.status==='Pending').reduce((s,e)=>s+e.amount,0);
+    const colSpanLabel = showVAT ? 2 : 2;
+    let tbodyHtml = '';
+    keys.forEach(key=>{
+      const g = groups[key];
+      const tAmt = g.reduce((s,e)=>s+e.amount,0);
+      const tVAT = g.reduce((s,e)=>s+(e.vatAmount||0),0);
+      tbodyHtml += `<tr><td colspan="99" style="background:#e8e8e8;font-weight:700;padding:10px 12px;font-size:13px;border-top:2px solid #bbb">${key}</td></tr>`;
+      g.forEach(e=>{
+        const vat=e.vatAmount||0;
+        tbodyHtml += `<tr>
+          <td>${fd(e.date)}</td><td>${e.service}</td>
+          <td style="text-align:right">${ef(e.amount)}</td>
+          ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
+          <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
+          <td style="color:${e.status==='Paid'?'#16a34a':'#d97706'}">${e.status}</td>
+        </tr>`;
+      });
+      tbodyHtml += `<tr style="background:#f5f5f5">
+        <td colspan="2" style="font-weight:600;color:#555;font-size:12px">Subtotal · ${g.length} entries</td>
+        <td style="text-align:right;font-weight:700">${ef(tAmt)}</td>
+        ${showVAT?`<td style="text-align:right;font-weight:700">${ef(tVAT)}</td>`:''}
+        <td style="text-align:right;font-weight:700">${ef(tAmt+tVAT)}</td>
+        <td></td>
+      </tr>`;
+    });
+    const gAmt=entries.reduce((s,e)=>s+e.amount,0);
     const gVAT=entries.reduce((s,e)=>s+(e.vatAmount||0),0);
-    const filterLabel=reportPayFilter==='cash'?' — Cash Only':reportPayFilter==='invoice'?' — Invoice / VAT':'';
-    const rows=Object.entries(cMap).map(([name,d])=>`<tr>
-      <td>${name}</td><td>${d.jobs}</td>
-      ${showCI?`<td>${d.cashJobs||'—'}</td><td>${d.invoiceJobs||'—'}</td>`:''}
-      <td>${fmt(d.paid)}</td><td>${d.pending>0?fmt(d.pending):'—'}</td>
-      ${showVAT?`<td>${fmt(d.vat)}</td>`:''}</tr>`).join('');
-    const gExp   = state.expenses.filter(e=>!month||monthKey(e.date)===month).reduce((s,e)=>s+e.amount,0);
-    const gNet   = gPaid - gExp;
-    const kpiHtml = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px">
-      <div style="border-radius:8px;padding:16px;background:#f0fdf4;border:1px solid #bbf7d0;text-align:center">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#16a34a;margin-bottom:4px">Collected</div>
-        <div style="font-size:20px;font-weight:800;color:#16a34a">${fmt(gPaid)}</div>
-      </div>
-      <div style="border-radius:8px;padding:16px;background:#fffbeb;border:1px solid #fde68a;text-align:center">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#d97706;margin-bottom:4px">Pending</div>
-        <div style="font-size:20px;font-weight:800;color:#d97706">${fmt(gPend)}</div>
-      </div>
-      <div style="border-radius:8px;padding:16px;background:#fef2f2;border:1px solid #fecaca;text-align:center">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#dc2626;margin-bottom:4px">Expenses</div>
-        <div style="font-size:20px;font-weight:800;color:#dc2626">${fmt(gExp)}</div>
-      </div>
-      <div style="border-radius:8px;padding:16px;background:${gNet>=0?'#eff6ff':'#fef2f2'};border:1px solid ${gNet>=0?'#bfdbfe':'#fecaca'};text-align:center">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:${gNet>=0?'#1d4ed8':'#dc2626'};margin-bottom:4px">Net Profit</div>
-        <div style="font-size:20px;font-weight:800;color:${gNet>=0?'#1d4ed8':'#dc2626'}">${fmt(gNet)}</div>
-      </div>
-    </div>`;
-    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
-      <title>All Income${filterLabel}${month?' · '+monthLabel(month):''}</title>
-      <style>body{font-family:Arial,sans-serif;padding:32px;color:#000;max-width:860px;margin:0 auto}
-      h1{font-size:22px;margin-bottom:4px}.meta{color:#555;font-size:12px;margin-bottom:20px}
-      table{width:100%;border-collapse:collapse}th{background:#f0f0f0;padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #ccc}
-      td{padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:13px}tfoot td{font-weight:bold;background:#f8f8f8;border-top:2px solid #ccc}</style></head><body>
-      <h1>All Income${filterLabel}</h1>
-      <div class="meta">Generated: ${new Date().toLocaleDateString('en-GB')}${month?' · '+monthLabel(month):''}</div>
-      ${kpiHtml}
-      <table><thead><tr><th>Client</th><th>Jobs</th>${showCI?'<th>Cash</th><th>Invoice</th>':''}<th>Paid</th><th>Pending</th>${showVAT?'<th>VAT</th>':''}</tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr><td>TOTAL</td><td>${entries.length}</td>
-        ${showCI?`<td>${entries.filter(e=>e.paymentType==='cash').length}</td><td>${entries.filter(e=>e.paymentType==='invoice').length}</td>`:''}
-        <td>${fmt(gPaid)}</td><td>${gPend>0?fmt(gPend):'—'}</td>${showVAT?`<td>${fmt(gVAT)}</td>`:''}</tr></tfoot>
-      </table><script>window.onload=()=>{window.print();}<\/script></body></html>`;
-    const w=window.open('','_blank'); w.document.write(html); w.document.close();
-    return;
+    bodyHtml = `<table><thead><tr>
+      <th>Date</th><th>Service</th>
+      <th style="text-align:right">Amount</th>
+      ${showVAT?'<th style="text-align:right">VAT</th>':''}
+      <th style="text-align:right">Total</th><th>Status</th>
+    </tr></thead><tbody>${tbodyHtml}</tbody>
+    <tfoot><tr>
+      <td colspan="2" style="font-weight:800">GRAND TOTAL · ${entries.length} entries</td>
+      <td style="text-align:right;font-weight:800">${ef(gAmt)}</td>
+      ${showVAT?`<td style="text-align:right;font-weight:800">${ef(gVAT)}</td>`:''}
+      <td style="text-align:right;font-weight:800;font-size:15px">${ef(gAmt+gVAT)}</td>
+      <td></td>
+    </tr></tfoot></table>`;
+  } else {
+    // Combined: all entries sorted by date, show sub-client column
+    const rows = entries.map(e=>{
+      const vat=e.vatAmount||0;
+      const cl=isAll?clientById(e.clientId):null;
+      return `<tr>
+        <td>${fd(e.date)}</td>
+        ${isAll?`<td>${cl?.name||'?'}</td>`:''}
+        <td>${e.subClient||'—'}</td>
+        <td>${e.service}</td>
+        <td style="text-align:right">${ef(e.amount)}</td>
+        ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
+        <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
+        <td style="color:${e.status==='Paid'?'#16a34a':'#d97706'}">${e.status}</td>
+      </tr>`;
+    }).join('');
+    const gAmt=entries.reduce((s,e)=>s+e.amount,0);
+    const gVAT=entries.reduce((s,e)=>s+(e.vatAmount||0),0);
+    const hdrSpan = 3 + (isAll?1:0);
+    bodyHtml = `<table><thead><tr>
+      <th>Date</th>
+      ${isAll?'<th>Client</th>':''}
+      <th>Sub-Client</th><th>Service</th>
+      <th style="text-align:right">Amount</th>
+      ${showVAT?'<th style="text-align:right">VAT</th>':''}
+      <th style="text-align:right">Total</th><th>Status</th>
+    </tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr>
+      <td colspan="${hdrSpan}" style="font-weight:800">TOTAL · ${entries.length} entries</td>
+      <td style="text-align:right;font-weight:800">${ef(gAmt)}</td>
+      ${showVAT?`<td style="text-align:right;font-weight:800">${ef(gVAT)}</td>`:''}
+      <td style="text-align:right;font-weight:800;font-size:15px">${ef(gAmt+gVAT)}</td>
+      <td></td>
+    </tr></tfoot></table>`;
   }
 
-  // ── Agency client (sub-client breakdown) ──────────────────────
-  const client = clientById(clientId);
-  let entries = state.income.filter(e=>e.clientId===clientId);
-  if (month) entries=entries.filter(e=>monthKey(e.date)===month);
-  if (reportPayFilter!=='all') entries=entries.filter(e=>e.paymentType===reportPayFilter);
-  if (!entries.length) { showToast('No entries to print','error'); return; }
-
-  const filterLabel = reportPayFilter==='cash' ? ' — Cash Jobs' : reportPayFilter==='invoice' ? ' — Invoice / VAT Jobs' : '';
-  const monthLabel2 = month ? ' · '+monthLabel(month) : '';
-  const showVAT = reportPayFilter!=='cash';
-  const showCashInv = reportPayFilter==='all';
-
-  const scMap={};
-  entries.forEach(e=>{
-    const k=e.subClient||'(General)';
-    if(!scMap[k])scMap[k]={paid:0,pending:0,jobs:0,vat:0,cashJobs:0,invoiceJobs:0};
-    scMap[k].jobs++; scMap[k].vat+=(e.vatAmount||0);
-    if(e.paymentType==='cash') scMap[k].cashJobs++; else scMap[k].invoiceJobs++;
-    if(e.status==='Paid')    scMap[k].paid+=e.amount;
-    if(e.status==='Pending') scMap[k].pending+=e.amount;
-  });
-  const gPaid=entries.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
-  const gPend=entries.filter(e=>e.status==='Pending').reduce((s,e)=>s+e.amount,0);
-  const gVAT=entries.reduce((s,e)=>s+(e.vatAmount||0),0);
-
-  const rows = Object.entries(scMap).map(([sc,d])=>`<tr>
-    <td>${sc}</td><td>${d.jobs}</td>
-    ${showCashInv?`<td>${d.cashJobs||'—'}</td><td>${d.invoiceJobs||'—'}</td>`:''}
-    <td>${fmt(d.paid)}</td>
-    <td>${d.pending>0?fmt(d.pending):'—'}</td>
-    ${showVAT?`<td>${fmt(d.vat)}</td>`:''}
-  </tr>`).join('');
-
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>${client?.name||'Report'}${filterLabel}${monthLabel2}</title>
+    <title>${title}${filterLabel}${monthStr}</title>
     <style>
-      body{font-family:Arial,sans-serif;padding:32px;color:#000;max-width:800px;margin:0 auto}
+      body{font-family:Arial,sans-serif;padding:32px;color:#000;max-width:960px;margin:0 auto}
       h1{font-size:22px;margin-bottom:4px}
       .meta{color:#555;font-size:12px;margin-bottom:24px}
       table{width:100%;border-collapse:collapse}
-      th{background:#f0f0f0;padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #ccc}
-      td{padding:10px 12px;border-bottom:1px solid #e0e0e0;font-size:13px}
-      tfoot td{font-weight:bold;background:#f8f8f8;border-top:2px solid #ccc}
+      th{background:#f0f0f0;padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #ccc}
+      td{padding:9px 12px;border-bottom:1px solid #e0e0e0;font-size:13px}
+      tfoot td{font-weight:bold;background:#f0f0f0;border-top:2px solid #bbb}
+      @media print{body{padding:0}}
     </style></head><body>
-    <h1>${client?.name||''}${filterLabel}</h1>
-    <div class="meta">Generated: ${new Date().toLocaleDateString('en-GB')}${monthLabel2}</div>
-    <table>
-      <thead><tr>
-        <th>Sub-Client</th><th>Jobs</th>
-        ${showCashInv?'<th>Cash</th><th>Invoice</th>':''}
-        <th>Paid</th><th>Pending</th>
-        ${showVAT?'<th>VAT</th>':''}
-      </tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr>
-        <td>TOTAL</td><td>${entries.length}</td>
-        ${showCashInv?`<td>${entries.filter(e=>e.paymentType==='cash').length}</td><td>${entries.filter(e=>e.paymentType==='invoice').length}</td>`:''}
-        <td>${fmt(gPaid)}</td><td>${gPend>0?fmt(gPend):'—'}</td>
-        ${showVAT?`<td>${fmt(gVAT)}</td>`:''}
-      </tr></tfoot>
-    </table>
+    <h1>${title}${filterLabel}</h1>
+    <div class="meta">Generated: ${new Date().toLocaleDateString('en-GB')}${monthStr} · ${subMode==='separated'?'Separated by sub-client':'Combined view'}</div>
+    ${bodyHtml}
     <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`;
 
   const w=window.open('','_blank');
+  if (!w) { showToast('Popup blocked — allow popups for printing','error'); return; }
   w.document.write(html);
   w.document.close();
 }
