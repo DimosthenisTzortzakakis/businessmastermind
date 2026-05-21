@@ -3182,6 +3182,7 @@ function executePrintReport(clientId, month, subMode, payFilter) {
         const vat=e.vatAmount||0;
         tbodyHtml += `<tr>
           <td>${fd(e.date)}</td><td>${e.service}</td>
+          <td style="color:#555">${e.notes||'—'}</td>
           <td style="text-align:right">${ef(e.amount)}</td>
           ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
           <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
@@ -3189,7 +3190,7 @@ function executePrintReport(clientId, month, subMode, payFilter) {
         </tr>`;
       });
       tbodyHtml += `<tr style="background:#f5f5f5">
-        <td colspan="2" style="font-weight:600;color:#555;font-size:12px">Subtotal · ${g.length} entries</td>
+        <td colspan="3" style="font-weight:600;color:#555;font-size:12px">Subtotal · ${g.length} entries</td>
         <td style="text-align:right;font-weight:700">${ef(tAmt)}</td>
         ${showVAT?`<td style="text-align:right;font-weight:700">${ef(tVAT)}</td>`:''}
         <td style="text-align:right;font-weight:700">${ef(tAmt+tVAT)}</td>
@@ -3199,13 +3200,13 @@ function executePrintReport(clientId, month, subMode, payFilter) {
     const gAmt=entries.reduce((s,e)=>s+e.amount,0);
     const gVAT=entries.reduce((s,e)=>s+(e.vatAmount||0),0);
     bodyHtml = `<table><thead><tr>
-      <th>Date</th><th>Service</th>
+      <th>Date</th><th>Service</th><th>Notes</th>
       <th style="text-align:right">Amount</th>
       ${showVAT?'<th style="text-align:right">VAT</th>':''}
       <th style="text-align:right">Total</th><th>Status</th>
     </tr></thead><tbody>${tbodyHtml}</tbody>
     <tfoot><tr>
-      <td colspan="2" style="font-weight:800">GRAND TOTAL · ${entries.length} entries</td>
+      <td colspan="3" style="font-weight:800">GRAND TOTAL · ${entries.length} entries</td>
       <td style="text-align:right;font-weight:800">${ef(gAmt)}</td>
       ${showVAT?`<td style="text-align:right;font-weight:800">${ef(gVAT)}</td>`:''}
       <td style="text-align:right;font-weight:800;font-size:15px">${ef(gAmt+gVAT)}</td>
@@ -3221,6 +3222,7 @@ function executePrintReport(clientId, month, subMode, payFilter) {
         ${isAll?`<td>${cl?.name||'?'}</td>`:''}
         <td>${e.subClient||'—'}</td>
         <td>${e.service}</td>
+        <td style="color:#555">${e.notes||'—'}</td>
         <td style="text-align:right">${ef(e.amount)}</td>
         ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
         <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
@@ -3229,11 +3231,11 @@ function executePrintReport(clientId, month, subMode, payFilter) {
     }).join('');
     const gAmt=entries.reduce((s,e)=>s+e.amount,0);
     const gVAT=entries.reduce((s,e)=>s+(e.vatAmount||0),0);
-    const hdrSpan = 3 + (isAll?1:0);
+    const hdrSpan = 4 + (isAll?1:0);
     bodyHtml = `<table><thead><tr>
       <th>Date</th>
       ${isAll?'<th>Client</th>':''}
-      <th>Sub-Client</th><th>Service</th>
+      <th>Sub-Client</th><th>Service</th><th>Notes</th>
       <th style="text-align:right">Amount</th>
       ${showVAT?'<th style="text-align:right">VAT</th>':''}
       <th style="text-align:right">Total</th><th>Status</th>
