@@ -9,6 +9,48 @@ const QE_EXP_KEY     = 'biz_qe_exp';
 const UI_STATE_KEY   = 'biz_ui_state';
 const VAT_RATE       = 0.24;
 
+// ── Compressed localStorage helpers ───────────────────────────
+// Uses LZ-string (UTF-16 variant) to compress JSON before storing.
+// Compresses ~4-5x so the 5 MB limit effectively becomes ~20 MB.
+// Backward-compatible: if the stored value is plain JSON (old data),
+// it falls back to JSON.parse automatically.
+function lsSet(key, obj) {
+  const json = JSON.stringify(obj);
+  const out  = (typeof LZString !== 'undefined')
+    ? LZString.compressToUTF16(json)
+    : json;
+  localStorage.setItem(key, out);
+}
+function lsGet(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  // Try decompressing first (new format)
+  if (typeof LZString !== 'undefined') {
+    try {
+      const dec = LZString.decompressFromUTF16(raw);
+      if (dec) return JSON.parse(dec);
+    } catch(_) {}
+  }
+  // Fall back to plain JSON (old / uncompressed data)
+  try { return JSON.parse(raw); } catch(_) {}
+  return null;
+}
+
+// Prune QE grid draft keys older than 6 months (they accumulate forever)
+function pruneQEGridData() {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 6);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  Object.keys(qeGridData).forEach(k => {
+    const parts = k.split('|');
+    if (parts.length >= 3 && parts[2] < cutoffStr) delete qeGridData[k];
+  });
+  // Also prune QE expense draft entries older than 6 months
+  Object.keys(qeExpenseGridData).forEach(d => {
+    if (d < cutoffStr) delete qeExpenseGridData[d];
+  });
+}
+
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 const DEFAULT_SERVICES = [
@@ -126,9 +168,8 @@ let chartMonthly  = null;
 // ── Persistence ────────────────────────────────────────────────
 function loadData() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const p = JSON.parse(raw);
+    const p = lsGet(STORAGE_KEY);
+    if (p) {
       state.clients      = p.clients  || DEFAULT_CLIENTS;
       state.income       = p.income   || [];
       state.expenses     = p.expenses || [];
@@ -144,21 +185,16 @@ function loadData() {
     if (!c.paymentType) c.paymentType = 'invoice';
     if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
   });
-  // Restore unsaved QE grid drafts (strip empty-string values to save space)
+  // Restore unsaved QE grid drafts, pruning anything older than 6 months
   try {
-    const qg = localStorage.getItem(QE_GRID_KEY);
-    if (qg) {
-      const parsed = JSON.parse(qg);
-      qeGridData = parsed;
-    }
+    const qg = lsGet(QE_GRID_KEY);
+    if (qg) qeGridData = qg;
   } catch(e) {}
   try {
-    const qe = localStorage.getItem(QE_EXP_KEY);
-    if (qe) {
-      const parsed = JSON.parse(qe);
-      qeExpenseGridData = parsed;
-    }
+    const qe = lsGet(QE_EXP_KEY);
+    if (qe) qeExpenseGridData = qe;
   } catch(e) {}
+  pruneQEGridData();
   // Restore last-used view and all filters
   loadUIState();
 }
@@ -205,21 +241,26 @@ function loadUIState() {
 function saveData() {
   state.lastModified = Date.now();
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    lsSet(STORAGE_KEY, state);
   } catch(e) {
     if (e.name === 'QuotaExceededError' || e.code === 22 || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-      // Free space by clearing QE draft data, then retry
-      try { localStorage.removeItem(QE_GRID_KEY); } catch(_) {}
-      try { localStorage.removeItem(QE_EXP_KEY); } catch(_) {}
-      qeGridData = {};
-      qeExpenseGridData = {};
+      // Free space: prune old QE drafts first, then clear them entirely if still full
+      pruneQEGridData();
+      try { lsSet(QE_GRID_KEY, qeGridData); } catch(_) {}
+      try { lsSet(QE_EXP_KEY, qeExpenseGridData); } catch(_) {}
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        lsSet(STORAGE_KEY, state);
       } catch(e2) {
-        // localStorage still full even after clearing caches — throw so caller
-        // can roll back the entry and show an error. Data must NOT silently stay
-        // only in memory (refresh = data loss).
-        throw new Error('STORAGE_FULL');
+        // Still full — clear QE caches entirely and last-resort retry
+        try { localStorage.removeItem(QE_GRID_KEY); } catch(_) {}
+        try { localStorage.removeItem(QE_EXP_KEY); } catch(_) {}
+        qeGridData = {};
+        qeExpenseGridData = {};
+        try {
+          lsSet(STORAGE_KEY, state);
+        } catch(e3) {
+          throw new Error('STORAGE_FULL');
+        }
       }
     } else {
       throw e;
@@ -1382,7 +1423,7 @@ function doDelete() {
       Object.keys(qeGridData).forEach(k => {
         if (k.includes('|' + cid + '|' + dt + '|')) delete qeGridData[k];
       });
-      try { localStorage.setItem(QE_GRID_KEY, JSON.stringify(qeGridData)); } catch(_) {}
+      try { lsSet(QE_GRID_KEY, qeGridData); } catch(_) {}
     }
     state.income = state.income.filter(e => e.id !== pendingDeleteId);
     showToast('Income entry deleted');
@@ -1441,7 +1482,7 @@ function captureQEGridData() {
     }
   });
   // Persist draft to localStorage so it survives refresh
-  try { localStorage.setItem(QE_GRID_KEY, JSON.stringify(qeGridData)); } catch(e) {}
+  try { lsSet(QE_GRID_KEY, qeGridData); } catch(e) {}
 }
 
 /* Load permanent income entries for the current month+service into the grid */
@@ -2087,7 +2128,7 @@ function captureQEExpGridData() {
     if ((qeExpenseGridData[ds]||[]).every(s=>!s.category&&!s.amount&&!s.note)) delete qeExpenseGridData[ds];
   });
   // Persist draft to localStorage so it survives refresh
-  try { localStorage.setItem(QE_EXP_KEY, JSON.stringify(qeExpenseGridData)); } catch(e) {}
+  try { lsSet(QE_EXP_KEY, qeExpenseGridData); } catch(e) {}
 }
 
 function initQEExpFromState() {
@@ -3549,7 +3590,7 @@ async function autoPull(silent) {
     state.services = p.services || [...DEFAULT_SERVICES];
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    lsSet(STORAGE_KEY, state);
     // If we had local-only entries, push the merged result back to Firebase
     if (localOnlyIncome.length || localOnlyExpense.length) {
       scheduleAutoPush();
@@ -3572,7 +3613,7 @@ async function cloudPush() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing…'; }
   try {
     state.lastModified = Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    lsSet(STORAGE_KEY, state);
     const res = await fetch(fbEndpoint(syncBlobId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -3600,7 +3641,7 @@ async function cloudPull() {
     state.expenses = p.expenses || [];
     state.services = p.services || [...DEFAULT_SERVICES];
     state.lastModified = p.lastModified || Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    lsSet(STORAGE_KEY, state);
     navigate(currentView);
     showToast('✓ Pulled from cloud');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
@@ -3614,7 +3655,7 @@ async function cloudCreate() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating…'; }
   try {
     state.lastModified = Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    lsSet(STORAGE_KEY, state);
     const id = (crypto.randomUUID ? crypto.randomUUID()
       : Math.random().toString(36).slice(2) + Date.now().toString(36));
     const res = await fetch(fbEndpoint(id), {
@@ -3707,7 +3748,7 @@ async function autoPullForced() {
     state.expenses = [...cloudExpenses, ...localOnlyExpense];
     state.services = p.services || [...DEFAULT_SERVICES];
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    lsSet(STORAGE_KEY, state);
     // Push merged result back if we had local-only entries
     if (localOnlyIncome.length || localOnlyExpense.length) scheduleAutoPush();
     navigate(currentView);
