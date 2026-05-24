@@ -9,30 +9,51 @@ const QE_EXP_KEY     = 'biz_qe_exp';
 const UI_STATE_KEY   = 'biz_ui_state';
 const VAT_RATE       = 0.24;
 
-// ── Compressed localStorage helpers ───────────────────────────
-// Uses LZ-string (UTF-16 variant) to compress JSON before storing.
-// Compresses ~4-5x so the 5 MB limit effectively becomes ~20 MB.
-// Backward-compatible: if the stored value is plain JSON (old data),
-// it falls back to JSON.parse automatically.
+// ── Storage helpers ────────────────────────────────────────────
+// Primary: IndexedDB via idb-keyval (no size limit, stores JS objects natively).
+// Fallback: compressed localStorage (lz-string) if IDB unavailable.
+// Migration: first idbGet transparently moves old localStorage data to IDB.
+
+// ── localStorage helpers (small keys: UI state, sync IDs) ──────
 function lsSet(key, obj) {
-  const json = JSON.stringify(obj);
-  const out  = (typeof LZString !== 'undefined')
-    ? LZString.compressToUTF16(json)
-    : json;
-  localStorage.setItem(key, out);
+  try {
+    const json = JSON.stringify(obj);
+    const out  = (typeof LZString !== 'undefined') ? LZString.compressToUTF16(json) : json;
+    localStorage.setItem(key, out);
+  } catch(_) {}
 }
 function lsGet(key) {
   const raw = localStorage.getItem(key);
   if (!raw) return null;
-  // Try decompressing first (new format)
   if (typeof LZString !== 'undefined') {
-    try {
-      const dec = LZString.decompressFromUTF16(raw);
-      if (dec) return JSON.parse(dec);
-    } catch(_) {}
+    try { const d = LZString.decompressFromUTF16(raw); if (d) return JSON.parse(d); } catch(_) {}
   }
-  // Fall back to plain JSON (old / uncompressed data)
   try { return JSON.parse(raw); } catch(_) {}
+  return null;
+}
+
+// ── IndexedDB helpers (main data: income, expenses, QE drafts) ─
+async function idbSet(key, value) {
+  try {
+    await idbKeyval.set(key, value);
+  } catch(e) {
+    lsSet(key, value); // fallback to compressed localStorage
+  }
+}
+async function idbGet(key) {
+  try {
+    const val = await idbKeyval.get(key);
+    if (val !== undefined) return val;
+    // One-time migration: move old compressed-localStorage data into IDB
+    const legacy = lsGet(key);
+    if (legacy !== null) {
+      await idbKeyval.set(key, legacy);
+      localStorage.removeItem(key); // free the old space
+      return legacy;
+    }
+  } catch(e) {
+    return lsGet(key); // IDB unavailable — fall back
+  }
   return null;
 }
 
@@ -45,7 +66,6 @@ function pruneQEGridData() {
     const parts = k.split('|');
     if (parts.length >= 3 && parts[2] < cutoffStr) delete qeGridData[k];
   });
-  // Also prune QE expense draft entries older than 6 months
   Object.keys(qeExpenseGridData).forEach(d => {
     if (d < cutoffStr) delete qeExpenseGridData[d];
   });
@@ -166,9 +186,9 @@ let chartByClient = null;
 let chartMonthly  = null;
 
 // ── Persistence ────────────────────────────────────────────────
-function loadData() {
+async function loadData() {
   try {
-    const p = lsGet(STORAGE_KEY);
+    const p = await idbGet(STORAGE_KEY);
     if (p) {
       state.clients      = p.clients  || DEFAULT_CLIENTS;
       state.income       = p.income   || [];
@@ -180,22 +200,13 @@ function loadData() {
       state.services = [...DEFAULT_SERVICES];
     }
   } catch(e) { state.clients = DEFAULT_CLIENTS; state.services = [...DEFAULT_SERVICES]; }
-  // Migration: ensure every client has paymentType + subclientPaymentTypes
   state.clients.forEach(c => {
     if (!c.paymentType) c.paymentType = 'invoice';
     if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
   });
-  // Restore unsaved QE grid drafts, pruning anything older than 6 months
-  try {
-    const qg = lsGet(QE_GRID_KEY);
-    if (qg) qeGridData = qg;
-  } catch(e) {}
-  try {
-    const qe = lsGet(QE_EXP_KEY);
-    if (qe) qeExpenseGridData = qe;
-  } catch(e) {}
+  try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
+  try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
   pruneQEGridData();
-  // Restore last-used view and all filters
   loadUIState();
 }
 
@@ -240,32 +251,7 @@ function loadUIState() {
 
 function saveData() {
   state.lastModified = Date.now();
-  try {
-    lsSet(STORAGE_KEY, state);
-  } catch(e) {
-    if (e.name === 'QuotaExceededError' || e.code === 22 || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-      // Free space: prune old QE drafts first, then clear them entirely if still full
-      pruneQEGridData();
-      try { lsSet(QE_GRID_KEY, qeGridData); } catch(_) {}
-      try { lsSet(QE_EXP_KEY, qeExpenseGridData); } catch(_) {}
-      try {
-        lsSet(STORAGE_KEY, state);
-      } catch(e2) {
-        // Still full — clear QE caches entirely and last-resort retry
-        try { localStorage.removeItem(QE_GRID_KEY); } catch(_) {}
-        try { localStorage.removeItem(QE_EXP_KEY); } catch(_) {}
-        qeGridData = {};
-        qeExpenseGridData = {};
-        try {
-          lsSet(STORAGE_KEY, state);
-        } catch(e3) {
-          throw new Error('STORAGE_FULL');
-        }
-      }
-    } else {
-      throw e;
-    }
-  }
+  idbSet(STORAGE_KEY, state); // fire-and-forget — IndexedDB has no size limit
   scheduleAutoPush();
 }
 
@@ -1423,7 +1409,7 @@ function doDelete() {
       Object.keys(qeGridData).forEach(k => {
         if (k.includes('|' + cid + '|' + dt + '|')) delete qeGridData[k];
       });
-      try { lsSet(QE_GRID_KEY, qeGridData); } catch(_) {}
+      idbSet(QE_GRID_KEY, qeGridData);
     }
     state.income = state.income.filter(e => e.id !== pendingDeleteId);
     showToast('Income entry deleted');
@@ -1482,7 +1468,7 @@ function captureQEGridData() {
     }
   });
   // Persist draft to localStorage so it survives refresh
-  try { lsSet(QE_GRID_KEY, qeGridData); } catch(e) {}
+  idbSet(QE_GRID_KEY, qeGridData);
 }
 
 /* Load permanent income entries for the current month+service into the grid */
@@ -2128,7 +2114,7 @@ function captureQEExpGridData() {
     if ((qeExpenseGridData[ds]||[]).every(s=>!s.category&&!s.amount&&!s.note)) delete qeExpenseGridData[ds];
   });
   // Persist draft to localStorage so it survives refresh
-  try { lsSet(QE_EXP_KEY, qeExpenseGridData); } catch(e) {}
+  idbSet(QE_EXP_KEY, qeExpenseGridData);
 }
 
 function initQEExpFromState() {
@@ -3590,7 +3576,7 @@ async function autoPull(silent) {
     state.services = p.services || [...DEFAULT_SERVICES];
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
-    lsSet(STORAGE_KEY, state);
+    idbSet(STORAGE_KEY, state);
     // If we had local-only entries, push the merged result back to Firebase
     if (localOnlyIncome.length || localOnlyExpense.length) {
       scheduleAutoPush();
@@ -3613,7 +3599,7 @@ async function cloudPush() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing…'; }
   try {
     state.lastModified = Date.now();
-    lsSet(STORAGE_KEY, state);
+    idbSet(STORAGE_KEY, state);
     const res = await fetch(fbEndpoint(syncBlobId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -3641,7 +3627,7 @@ async function cloudPull() {
     state.expenses = p.expenses || [];
     state.services = p.services || [...DEFAULT_SERVICES];
     state.lastModified = p.lastModified || Date.now();
-    lsSet(STORAGE_KEY, state);
+    idbSet(STORAGE_KEY, state);
     navigate(currentView);
     showToast('✓ Pulled from cloud');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
@@ -3655,7 +3641,7 @@ async function cloudCreate() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating…'; }
   try {
     state.lastModified = Date.now();
-    lsSet(STORAGE_KEY, state);
+    idbSet(STORAGE_KEY, state);
     const id = (crypto.randomUUID ? crypto.randomUUID()
       : Math.random().toString(36).slice(2) + Date.now().toString(36));
     const res = await fetch(fbEndpoint(id), {
@@ -3748,7 +3734,7 @@ async function autoPullForced() {
     state.expenses = [...cloudExpenses, ...localOnlyExpense];
     state.services = p.services || [...DEFAULT_SERVICES];
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
-    lsSet(STORAGE_KEY, state);
+    idbSet(STORAGE_KEY, state);
     // Push merged result back if we had local-only entries
     if (localOnlyIncome.length || localOnlyExpense.length) scheduleAutoPush();
     navigate(currentView);
@@ -3857,8 +3843,8 @@ function importData(ev) {
 }
 
 // ── Init ───────────────────────────────────────────────────────
-function init() {
-  loadData();
+async function init() {
+  await loadData();
   // Always start income/expense tabs on current month (override UIState)
   incMonth  = todayVal().slice(0,7);
   expMonth  = todayVal().slice(0,7);
