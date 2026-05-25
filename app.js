@@ -2001,7 +2001,8 @@ function saveQEGrid() {
           const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||'') && e.service===service);
           const cPayType = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
           if (xi >= 0) {
-            state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, status:qeGridStatus, paymentType:cPayType };
+            state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, paymentType:cPayType };
+            // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
           } else {
             const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice, sharedPrice:price,
               vatAmount:cPayType==='invoice'?amount*VAT_RATE:0,
@@ -2020,7 +2021,8 @@ function saveQEGrid() {
         const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')=== '' && e.service===service);
         const cPayType2 = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
         if (xi >= 0) {
-          state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, status:qeGridStatus, paymentType:cPayType2 };
+          state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, paymentType:cPayType2 };
+          // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
         } else {
           const entry = { id:genId(), clientId:cid, subClient:'', service, amount, qty, unitPrice:price,
             vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0,
