@@ -155,11 +155,20 @@ let qeGridSelectedClients = [];
 let qeGridService = 'Video Editing'; // default for new client columns
 let qeClientServices = {}; // clientId → service override
 
-function getClientService(cid) {
+// sub = subclient name (agency) or '' (direct)
+// Fallback chain: subclient override → client override → global default
+function getClientService(cid, sub) {
+  if (sub) {
+    const subKey = cid + '|' + sub;
+    if (qeClientServices[subKey]) return qeClientServices[subKey].trim();
+  }
   return (qeClientServices[cid] || qeGridService || 'Video Editing').trim();
 }
-function setClientService(cid, svc) {
-  qeClientServices[cid] = svc;
+// setClientService(cid, '', svc)  → client-level default (direct clients & agency default)
+// setClientService(cid, sub, svc) → per-subclient override (agency subclients)
+function setClientService(cid, sub, svc) {
+  const key = sub ? (cid + '|' + sub) : cid;
+  qeClientServices[key] = svc;
   saveUIState();
 }
 let qeGridStatus = 'Pending';
@@ -1635,23 +1644,33 @@ function renderQEIncome(cont) {
   //                  direct gets Qty + Price + Total
   const clientColCount = c => (c.subclients||[]).length > 0 ? (c.subclients.length + 2) : 3;
 
-  // Header row 1: Day | Note | [ClientName + service input spanning N cols] | Day Total
+  // Header row 1: client name + service (direct) or client name + default service (agency)
   const hRow1 = selCols.map(c=>{
     const bg = hexToRgba(c.color, 0.09);
+    const subs = c.subclients||[];
     const svcVal = (qeClientServices[c.id] || qeGridService || 'Video Editing').replace(/'/g,'&#39;');
+    const placeholder = subs.length > 0 ? 'Default service…' : 'Service…';
     return '<th colspan="'+clientColCount(c)+'" class="qe-th-client" style="border-top:3px solid '+c.color+';border-left:2px solid '+c.color+';background:'+bg+';text-align:center">'
       +'<div style="font-weight:700;margin-bottom:4px">'+c.name+'</div>'
-      +'<input class="qe-client-svc-inp" list="servicesList" value="'+svcVal+'" placeholder="Service…" '
-      +'oninput="setClientService(\''+c.id+'\',this.value)" />'
+      +'<input class="qe-client-svc-inp" list="servicesList" value="'+svcVal+'" placeholder="'+placeholder+'" '
+      +'oninput="setClientService(\''+c.id+'\',\'\',this.value)" />'
       +'</th>';
   }).join('');
 
-  // Header row 2: per client sub-headers
+  // Header row 2: per-subclient name + service input (agency) or Qty/Price/Total (direct)
   const hRow2 = selCols.map(c=>{
     const subs = c.subclients||[];
     const bg = hexToRgba(c.color, 0.06);
     if (subs.length > 0) {
-      return subs.map((s,si)=>'<th class="qe-sh" style="'+(si===0?'border-left:2px solid '+c.color+';':'')+' background:'+bg+'">'+s+'</th>').join('')
+      return subs.map((s,si)=>{
+        const subSvcVal = getClientService(c.id, s).replace(/'/g,'&#39;');
+        const bl = si===0 ? 'border-left:2px solid '+c.color+';' : '';
+        return '<th class="qe-sh" style="'+bl+' background:'+bg+';vertical-align:top">'
+          +'<div>'+s+'</div>'
+          +'<input class="qe-client-svc-inp" list="servicesList" value="'+subSvcVal+'" placeholder="Service…" '
+          +'oninput="setClientService(\''+c.id+'\',\''+s.replace(/'/g,"\\'")+'\',this.value)" />'
+          +'</th>';
+      }).join('')
         +'<th class="qe-sh qe-sh-price" style="background:'+bg+'">€/unit</th>'
         +'<th class="qe-sh qe-sh-total" style="background:'+bg+'">Total</th>';
     }
@@ -2002,13 +2021,13 @@ function saveQEGrid() {
       const cid = priceInp.dataset.client;
       if (done.has(cid)) return; done.add(cid);
       const price = parseFloat(priceInp.value) || 0;
-      const service = getClientService(cid);
       const subqtys = tr.querySelectorAll('[data-client="'+cid+'"][data-type="subqty"]');
       if (subqtys.length > 0) {
         subqtys.forEach(sq=>{
           const qty = parseFloat(sq.value) || 0;
           if (qty <= 0) return;
           const sub = sq.dataset.sub;
+          const service = getClientService(cid, sub); // per-subclient service
           const subPriceEl = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subprice"]');
           const subNoteEl  = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subnote"]');
           const effectivePrice = parseFloat(subPriceEl?.value) || price;
@@ -2030,6 +2049,7 @@ function saveQEGrid() {
           savedCount++; savedTotal += amount;
         });
       } else {
+        const service = getClientService(cid); // direct client — client-level service
         const qty = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value) || 0;
         if (qty <= 0) return;
         const subNoteEl = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
@@ -2058,18 +2078,19 @@ function saveQEGrid() {
     tr.querySelectorAll('[data-type="price"]').forEach(priceInp => {
       const cid2 = priceInp.dataset.client;
       if (done3.has(cid2)) return; done3.add(cid2);
-      const svc2 = getClientService(cid2); // per-client service
       const subqtys2 = tr.querySelectorAll('[data-client="'+cid2+'"][data-type="subqty"]');
       if (subqtys2.length > 0) {
         subqtys2.forEach(sq2 => {
           if ((parseFloat(sq2.value)||0) <= 0) {
             const sub2 = sq2.dataset.sub;
+            const svc2 = getClientService(cid2, sub2); // per-subclient service
             state.income = state.income.filter(e =>
               !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && e.service===svc2)
             );
           }
         });
       } else {
+        const svc2 = getClientService(cid2); // direct client
         const qi2 = tr.querySelector('[data-client="'+cid2+'"][data-type="qty"]');
         if ((parseFloat(qi2?.value)||0) <= 0 && (parseFloat(priceInp.value)||0) <= 0) {
           state.income = state.income.filter(e =>
