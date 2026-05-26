@@ -152,7 +152,16 @@ let qeTab = 'income';
 // QE Grid / Spreadsheet state
 let qeGridMonth = '';
 let qeGridSelectedClients = [];
-let qeGridService = 'Video Editing';
+let qeGridService = 'Video Editing'; // default for new client columns
+let qeClientServices = {}; // clientId → service override
+
+function getClientService(cid) {
+  return (qeClientServices[cid] || qeGridService || 'Video Editing').trim();
+}
+function setClientService(cid, svc) {
+  qeClientServices[cid] = svc;
+  saveUIState();
+}
 let qeGridStatus = 'Pending';
 let qeGridPayType = 'cash';
 let qeGridData = {}; // persistent grid state: key = "type|clientId|date|sub", value = string
@@ -217,7 +226,7 @@ function saveUIState() {
       incMonth, incClient, incStatus, incPayType, incViewMode,
       expMonth, expCategory, expViewMode,
       qeTab, qeGridMonth, qeGridService, qeGridStatus, qeGridPayType,
-      qeGridSelectedClients, qeExpPayMethod, reportPayFilter, reportSubMode
+      qeGridSelectedClients, qeExpPayMethod, reportPayFilter, reportSubMode, qeClientServices
     }));
   } catch(e) {}
 }
@@ -245,6 +254,7 @@ function loadUIState() {
     if (s.qeExpPayMethod)        qeExpPayMethod        = s.qeExpPayMethod;
     if (s.reportPayFilter)       reportPayFilter       = s.reportPayFilter;
     if (s.reportSubMode)         reportSubMode         = s.reportSubMode;
+    if (s.qeClientServices && typeof s.qeClientServices === 'object') qeClientServices = s.qeClientServices;
     if (Array.isArray(s.qeGridSelectedClients)) qeGridSelectedClients = s.qeGridSelectedClients;
   } catch(e) {}
 }
@@ -1583,9 +1593,9 @@ function restoreQEGridData() {
   // Color per-client-per-day total cells
   document.querySelectorAll('.qe-client-total[data-client][data-date]').forEach(ct => {
     const cid = ct.dataset.client; const ds = ct.dataset.date;
-    const service = (qeGridService||'').trim();
+    const svc = getClientService(cid);
     const entries = state.income.filter(e =>
-      e.clientId===cid && e.date===ds && (!service||e.service===service)
+      e.clientId===cid && e.date===ds && (!svc||e.service===svc)
     );
     if (!entries.length) return;
     const hasPending = entries.some(e=>e.status==='Pending');
@@ -1625,10 +1635,15 @@ function renderQEIncome(cont) {
   //                  direct gets Qty + Price + Total
   const clientColCount = c => (c.subclients||[]).length > 0 ? (c.subclients.length + 2) : 3;
 
-  // Header row 1: Day | Note | [ClientName spanning N cols] | Day Total
+  // Header row 1: Day | Note | [ClientName + service input spanning N cols] | Day Total
   const hRow1 = selCols.map(c=>{
     const bg = hexToRgba(c.color, 0.09);
-    return '<th colspan="'+clientColCount(c)+'" class="qe-th-client" style="border-top:3px solid '+c.color+';border-left:2px solid '+c.color+';background:'+bg+';text-align:center">'+c.name+'</th>';
+    const svcVal = (qeClientServices[c.id] || qeGridService || 'Video Editing').replace(/'/g,'&#39;');
+    return '<th colspan="'+clientColCount(c)+'" class="qe-th-client" style="border-top:3px solid '+c.color+';border-left:2px solid '+c.color+';background:'+bg+';text-align:center">'
+      +'<div style="font-weight:700;margin-bottom:4px">'+c.name+'</div>'
+      +'<input class="qe-client-svc-inp" list="servicesList" value="'+svcVal+'" placeholder="Service…" '
+      +'oninput="setClientService(\''+c.id+'\',this.value)" />'
+      +'</th>';
   }).join('');
 
   // Header row 2: per client sub-headers
@@ -1697,7 +1712,7 @@ function renderQEIncome(cont) {
           <select class="form-select" style="padding:7px 10px;font-size:13px" onchange="qeGridMonth=this.value;renderQEIncome(document.getElementById('qeContent'))">${moOpts}</select>
         </div>
         <div class="qe-ctrl-field" style="flex:2">
-          <label class="qe-ctrl-label">Service</label>
+          <label class="qe-ctrl-label">Default Service</label>
           <input type="text" class="form-input" style="padding:7px 10px;font-size:13px" value="${qeGridService}" list="servicesList" placeholder="e.g. Video Editing" oninput="qeGridService=this.value" onchange="renderQEIncome(document.getElementById('qeContent'))" />
         </div>
         <div class="qe-ctrl-field">
@@ -1745,42 +1760,45 @@ function renderQEIncome(cont) {
 
 // Returns the status of saved income entries for a given date in QE context
 function getQERowStatus(dateStr) {
-  const service = (qeGridService || '').trim();
-  const entries = state.income.filter(e =>
-    e.date === dateStr &&
-    e.date.startsWith(qeGridMonth) &&
-    (!service || e.service === service)
-  );
+  // Aggregate across all selected clients, each using their own service
+  const entries = [];
+  qeGridSelectedClients.forEach(cid => {
+    const svc = getClientService(cid);
+    state.income.forEach(e => {
+      if (e.clientId === cid && e.date === dateStr && (!svc || e.service === svc))
+        entries.push(e);
+    });
+  });
   if (!entries.length) return null;
   return entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
 }
 
 // Toggle all saved income entries for a date between Paid and Pending
 function toggleQERowStatus(dateStr) {
-  const service = (qeGridService || '').trim();
-  const entries = state.income.filter(e =>
-    e.date === dateStr &&
-    e.date.startsWith(qeGridMonth) &&
-    (!service || e.service === service)
-  );
-  if (!entries.length) return; // nothing saved to toggle
+  const entries = [];
+  qeGridSelectedClients.forEach(cid => {
+    const svc = getClientService(cid);
+    state.income.forEach(e => {
+      if (e.clientId === cid && e.date === dateStr && (!svc || e.service === svc))
+        entries.push(e);
+    });
+  });
+  if (!entries.length) return;
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
   entries.forEach(e => { e.status = newStatus; });
   saveData();
-  // Update the visual in the total cell
   const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
   if (cell) applyQETotalColor(cell, newStatus);
-  // Show brief toast
   showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
 }
 
 // Toggle a single client's entries for one specific day
 function toggleQEClientDayStatus(cid, dateStr) {
-  const service = (qeGridService || '').trim();
+  const svc = getClientService(cid);
   const entries = state.income.filter(e =>
     e.clientId === cid && e.date === dateStr &&
-    (!service || e.service === service)
+    (!svc || e.service === svc)
   );
   if (!entries.length) return; // nothing saved yet
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
@@ -1803,10 +1821,10 @@ function toggleQEClientDayStatus(cid, dateStr) {
 
 // Get combined status for all entries of a client in current QE month/service
 function getQEClientStatus(cid) {
-  const service = (qeGridService || '').trim();
+  const svc = getClientService(cid);
   const entries = state.income.filter(e =>
     e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
-    (!service || e.service === service)
+    (!svc || e.service === svc)
   );
   if (!entries.length) return null;
   return entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
@@ -1814,10 +1832,10 @@ function getQEClientStatus(cid) {
 
 // Toggle ALL saved entries for a client (entire month) between Paid and Pending
 function toggleQEClientStatus(cid) {
-  const service = (qeGridService || '').trim();
+  const svc = getClientService(cid);
   const entries = state.income.filter(e =>
     e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
-    (!service || e.service === service)
+    (!svc || e.service === svc)
   );
   if (!entries.length) { showToast('No saved entries for this client yet','error'); return; }
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
@@ -1984,7 +2002,7 @@ function saveQEGrid() {
       const cid = priceInp.dataset.client;
       if (done.has(cid)) return; done.add(cid);
       const price = parseFloat(priceInp.value) || 0;
-      const service = (qeGridService||'Video Editing').trim();
+      const service = getClientService(cid);
       const subqtys = tr.querySelectorAll('[data-client="'+cid+'"][data-type="subqty"]');
       if (subqtys.length > 0) {
         subqtys.forEach(sq=>{
@@ -2034,20 +2052,20 @@ function saveQEGrid() {
     });
   });
   // Delete entries for cells that are now zero/empty (user cleared them)
-  const service2 = (qeGridService||'Video Editing').trim();
   table.querySelectorAll('tbody tr').forEach(tr => {
     const ds = tr.dataset.date;
     const done3 = new Set();
     tr.querySelectorAll('[data-type="price"]').forEach(priceInp => {
       const cid2 = priceInp.dataset.client;
       if (done3.has(cid2)) return; done3.add(cid2);
+      const svc2 = getClientService(cid2); // per-client service
       const subqtys2 = tr.querySelectorAll('[data-client="'+cid2+'"][data-type="subqty"]');
       if (subqtys2.length > 0) {
         subqtys2.forEach(sq2 => {
           if ((parseFloat(sq2.value)||0) <= 0) {
             const sub2 = sq2.dataset.sub;
             state.income = state.income.filter(e =>
-              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && e.service===service2)
+              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && e.service===svc2)
             );
           }
         });
@@ -2055,7 +2073,7 @@ function saveQEGrid() {
         const qi2 = tr.querySelector('[data-client="'+cid2+'"][data-type="qty"]');
         if ((parseFloat(qi2?.value)||0) <= 0 && (parseFloat(priceInp.value)||0) <= 0) {
           state.income = state.income.filter(e =>
-            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')=== '' && e.service===service2)
+            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')=== '' && e.service===svc2)
           );
         }
       }
