@@ -1910,18 +1910,35 @@ function updateQEClientTotal(inp) {
     const price = sharedPrice;
     if (qty > 0 && price > 0) clientTotal = Math.round(qty * price * 100) / 100;
   }
+  const dateStr = inp.dataset.date || tr.dataset.date;
   const ct = tr.querySelector('.qe-client-total[data-client="'+cid+'"]');
-  if (ct) { ct.textContent = clientTotal > 0 ? fmt(clientTotal) : '—'; ct.dataset.value = clientTotal; }
+  if (ct) {
+    ct.textContent = clientTotal > 0 ? fmt(clientTotal) : '—';
+    ct.dataset.value = clientTotal;
+    // Color the client-total cell: orange the moment a value is typed,
+    // green only if saved entries already show Paid
+    if (clientTotal > 0) {
+      const svc = getClientService(cid);
+      const saved = state.income.filter(e =>
+        e.clientId===cid && e.date===dateStr && (!svc || e.service===svc)
+      );
+      const st = saved.length ? (saved.some(e=>e.status==='Pending') ? 'Pending' : 'Paid') : 'Pending';
+      ct.style.color      = st === 'Paid' ? 'var(--green)' : '#f59e0b';
+      ct.style.fontWeight = '700';
+      ct.title = st === 'Paid' ? 'Paid — tap to mark Pending' : 'Pending — tap to mark Paid';
+    } else {
+      ct.style.color = ''; ct.style.fontWeight = ''; ct.title = 'Tap to toggle Paid/Pending';
+    }
+  }
   // Day total
   let dayTotal = 0;
   tr.querySelectorAll('.qe-client-total').forEach(c=>{ dayTotal += parseFloat(c.dataset.value)||0; });
   const dt = tr.querySelector('.qe-td-total');
   if (dt) {
     dt.textContent = dayTotal > 0 ? fmt(dayTotal) : '—';
-    const rowStatus = getQERowStatus(inp.dataset.date || tr.dataset.date);
-    // If no saved entry yet but there's a draft value, use qeGridStatus for coloring
-    // (defaults to Pending = orange)
-    const colorStatus = rowStatus !== null ? rowStatus : (dayTotal > 0 ? qeGridStatus : null);
+    const rowStatus = getQERowStatus(dateStr);
+    // Orange the moment anything is typed; green only when all saved entries are Paid
+    const colorStatus = rowStatus !== null ? rowStatus : (dayTotal > 0 ? 'Pending' : null);
     applyQETotalColor(dt, colorStatus);
   }
   updateQEColTotals();
