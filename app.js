@@ -225,7 +225,36 @@ async function loadData() {
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
   pruneQEGridData();
+  deduplicateIncome(); // remove any doubled QE entries (same client+date+sub)
   loadUIState();
+}
+
+// Remove duplicate income entries that share the same clientId+date+subClient.
+// Keeps the most recent entry (by createdAt). Caused by service-name mismatches
+// during saveQEGrid upsert lookups. Safe to run on every load.
+function deduplicateIncome() {
+  const seen = new Map();
+  const toRemove = new Set();
+  state.income.forEach((e, i) => {
+    const key = (e.clientId||'') + '|' + (e.date||'') + '|' + (e.subClient||'');
+    if (seen.has(key)) {
+      const prev = seen.get(key);
+      // Keep whichever has the later createdAt; mark the other for removal
+      if ((e.createdAt||0) >= (state.income[prev].createdAt||0)) {
+        toRemove.add(prev);
+        seen.set(key, i);
+      } else {
+        toRemove.add(i);
+      }
+    } else {
+      seen.set(key, i);
+    }
+  });
+  if (toRemove.size > 0) {
+    console.log('Dedup: removed', toRemove.size, 'duplicate income entries');
+    state.income = state.income.filter((_, i) => !toRemove.has(i));
+    idbSet(STORAGE_KEY, state); // persist the cleaned data immediately
+  }
 }
 
 function saveUIState() {
@@ -1490,10 +1519,11 @@ function captureQEGridData() {
   idbSet(QE_GRID_KEY, qeGridData);
 }
 
-/* Load permanent income entries for the current month+service into the grid */
+/* Load permanent income entries for the current month into the grid.
+   Service is NOT used as a filter here — one entry per client+date+sub is shown
+   regardless of which service it was saved under. */
 function loadQEFromState(table) {
   if (!table) return;
-  // Load ALL entries for the month — service filtering is per-client/subclient
   const monthEntries = state.income.filter(e => e.date && e.date.startsWith(qeGridMonth));
   if (!monthEntries.length) return;
 
@@ -1502,17 +1532,13 @@ function loadQEFromState(table) {
     const dayEntries = monthEntries.filter(e => e.date === dateStr);
     if (!dayEntries.length) return;
 
-    // Group by clientId
     const byClient = {};
     dayEntries.forEach(e => { (byClient[e.clientId] = byClient[e.clientId]||[]).push(e); });
 
     Object.entries(byClient).forEach(([cid, allClientEntries]) => {
-      // For direct clients: filter by client-level service
-      // For agency clients: each subclient filters by its own service (handled below)
       const hasSubclients = allClientEntries.some(e => e.subClient);
-      const entries = hasSubclients
-        ? allClientEntries  // agency: keep all, filter per subclient below
-        : allClientEntries.filter(e => e.service === getClientService(cid));
+      // No service filter: show whatever is stored for this client+date+sub
+      const entries = allClientEntries;
 
       if (hasSubclients) {
         // Agency: find shared price from saved entries, set it; then per-subclient qty + override
@@ -1521,7 +1547,7 @@ function loadQEFromState(table) {
         const sharedInp = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
         if (sharedInp) sharedInp.value = sharedPrice || '';
 
-        entries.filter(e => e.subClient && e.service === getClientService(cid, e.subClient)).forEach(entry => {
+        entries.filter(e => e.subClient).forEach(entry => {
           const sub = entry.subClient;
           const subqtyInp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subqty"]');
           if (subqtyInp) {
@@ -2054,10 +2080,11 @@ function saveQEGrid() {
           const subNote = subNoteEl?.value.trim() || '';
           const amount = Math.round(qty * effectivePrice * 100) / 100;
           // Upsert: update existing entry or create new
-          const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||'') && e.service===service);
+          // Match on client+date+sub only — service can change, we update it in-place
+          const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||''));
           const cPayType = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
           if (xi >= 0) {
-            state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, paymentType:cPayType };
+            state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, paymentType:cPayType };
             // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
           } else {
             const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice, sharedPrice:price,
@@ -2075,10 +2102,11 @@ function saveQEGrid() {
         const subNote = subNoteEl?.value.trim() || '';
         const amount = Math.round(qty * price * 100) / 100;
         if (amount <= 0) return;
-        const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')=== '' && e.service===service);
+        // Match on client+date+sub only — service can change, update it in-place
+        const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')==='');
         const cPayType2 = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
         if (xi >= 0) {
-          state.income[xi] = { ...state.income[xi], amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, paymentType:cPayType2 };
+          state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, paymentType:cPayType2 };
           // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
         } else {
           const entry = { id:genId(), clientId:cid, subClient:'', service, amount, qty, unitPrice:price,
@@ -2102,18 +2130,17 @@ function saveQEGrid() {
         subqtys2.forEach(sq2 => {
           if ((parseFloat(sq2.value)||0) <= 0) {
             const sub2 = sq2.dataset.sub;
-            const svc2 = getClientService(cid2, sub2); // per-subclient service
+            // Remove by client+date+sub — no service condition to avoid leaving orphans
             state.income = state.income.filter(e =>
-              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && e.service===svc2)
+              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||''))
             );
           }
         });
       } else {
-        const svc2 = getClientService(cid2); // direct client
         const qi2 = tr.querySelector('[data-client="'+cid2+'"][data-type="qty"]');
         if ((parseFloat(qi2?.value)||0) <= 0 && (parseFloat(priceInp.value)||0) <= 0) {
           state.income = state.income.filter(e =>
-            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')=== '' && e.service===svc2)
+            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')==='')
           );
         }
       }
