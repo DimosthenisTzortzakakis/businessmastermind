@@ -1493,11 +1493,8 @@ function captureQEGridData() {
 /* Load permanent income entries for the current month+service into the grid */
 function loadQEFromState(table) {
   if (!table) return;
-  const service = (qeGridService||'').trim();
-  // Get entries for this month (filter by service if set, else show all)
-  const monthEntries = state.income.filter(e =>
-    e.date && e.date.startsWith(qeGridMonth) && (!service || e.service === service)
-  );
+  // Load ALL entries for the month — service filtering is per-client/subclient
+  const monthEntries = state.income.filter(e => e.date && e.date.startsWith(qeGridMonth));
   if (!monthEntries.length) return;
 
   table.querySelectorAll('tbody tr[data-date]').forEach(tr => {
@@ -1509,8 +1506,13 @@ function loadQEFromState(table) {
     const byClient = {};
     dayEntries.forEach(e => { (byClient[e.clientId] = byClient[e.clientId]||[]).push(e); });
 
-    Object.entries(byClient).forEach(([cid, entries]) => {
-      const hasSubclients = entries.some(e => e.subClient);
+    Object.entries(byClient).forEach(([cid, allClientEntries]) => {
+      // For direct clients: filter by client-level service
+      // For agency clients: each subclient filters by its own service (handled below)
+      const hasSubclients = allClientEntries.some(e => e.subClient);
+      const entries = hasSubclients
+        ? allClientEntries  // agency: keep all, filter per subclient below
+        : allClientEntries.filter(e => e.service === getClientService(cid));
 
       if (hasSubclients) {
         // Agency: find shared price from saved entries, set it; then per-subclient qty + override
@@ -1519,7 +1521,7 @@ function loadQEFromState(table) {
         const sharedInp = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
         if (sharedInp) sharedInp.value = sharedPrice || '';
 
-        entries.filter(e => e.subClient).forEach(entry => {
+        entries.filter(e => e.subClient && e.service === getClientService(cid, e.subClient)).forEach(entry => {
           const sub = entry.subClient;
           const subqtyInp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subqty"]');
           if (subqtyInp) {
@@ -3275,15 +3277,13 @@ function executePrintReport(clientId, month, subMode, payFilter) {
           <td style="text-align:right">${ef(e.amount)}</td>
           ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
           <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
-          <td style="color:${e.status==='Paid'?'#16a34a':'#d97706'}">${e.status}</td>
         </tr>`;
       });
       tbodyHtml += `<tr style="background:#f5f5f5">
-        <td colspan="5" style="font-weight:600;color:#555;font-size:12px">Subtotal · ${g.length} entries</td>
+        <td colspan="5" style="font-weight:700;font-size:12px">TOTAL</td>
         <td style="text-align:right;font-weight:700">${ef(tAmt)}</td>
         ${showVAT?`<td style="text-align:right;font-weight:700">${ef(tVAT)}</td>`:''}
         <td style="text-align:right;font-weight:700">${ef(tAmt+tVAT)}</td>
-        <td></td>
       </tr>`;
     });
     const gAmt=entries.reduce((s,e)=>s+e.amount,0);
@@ -3293,14 +3293,13 @@ function executePrintReport(clientId, month, subMode, payFilter) {
       <th style="text-align:center">Qty</th><th style="text-align:right">Unit €</th>
       <th style="text-align:right">Amount</th>
       ${showVAT?'<th style="text-align:right">VAT</th>':''}
-      <th style="text-align:right">Total</th><th>Status</th>
+      <th style="text-align:right">Total</th>
     </tr></thead><tbody>${tbodyHtml}</tbody>
     <tfoot><tr>
-      <td colspan="5" style="font-weight:800">GRAND TOTAL · ${entries.length} entries</td>
+      <td colspan="5" style="font-weight:800">GRAND TOTAL</td>
       <td style="text-align:right;font-weight:800">${ef(gAmt)}</td>
       ${showVAT?`<td style="text-align:right;font-weight:800">${ef(gVAT)}</td>`:''}
       <td style="text-align:right;font-weight:800;font-size:15px">${ef(gAmt+gVAT)}</td>
-      <td></td>
     </tr></tfoot></table>`;
   } else {
     // Combined: all entries sorted by date, show sub-client column
@@ -3320,7 +3319,6 @@ function executePrintReport(clientId, month, subMode, payFilter) {
         <td style="text-align:right">${ef(e.amount)}</td>
         ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
         <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
-        <td style="color:${e.status==='Paid'?'#16a34a':'#d97706'}">${e.status}</td>
       </tr>`;
     }).join('');
     const gAmt=entries.reduce((s,e)=>s+e.amount,0);
@@ -3333,31 +3331,48 @@ function executePrintReport(clientId, month, subMode, payFilter) {
       <th style="text-align:center">Qty</th><th style="text-align:right">Unit €</th>
       <th style="text-align:right">Amount</th>
       ${showVAT?'<th style="text-align:right">VAT</th>':''}
-      <th style="text-align:right">Total</th><th>Status</th>
+      <th style="text-align:right">Total</th>
     </tr></thead><tbody>${rows}</tbody>
     <tfoot><tr>
-      <td colspan="${hdrSpan}" style="font-weight:800">TOTAL · ${entries.length} entries</td>
+      <td colspan="${hdrSpan}" style="font-weight:800">GRAND TOTAL</td>
       <td style="text-align:right;font-weight:800">${ef(gAmt)}</td>
       ${showVAT?`<td style="text-align:right;font-weight:800">${ef(gVAT)}</td>`:''}
       <td style="text-align:right;font-weight:800;font-size:15px">${ef(gAmt+gVAT)}</td>
-      <td></td>
     </tr></tfoot></table>`;
   }
 
+  const logoSvg = `<svg width="36" height="36" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:middle;margin-right:10px">
+    <rect width="34" height="34" rx="9" fill="#0f0f1a"/>
+    <path d="M23 13C23 10.79 21.21 9 19 9H15C12.79 9 11 10.79 11 13C11 15.21 12.79 17 15 17H19C21.21 17 23 18.79 23 21C23 23.21 21.21 25 19 25H15C12.79 25 11 23.21 11 21" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M17 3.5L13.5 8H16.5V11.5H17.5V8H20.5L17 3.5Z" fill="white"/>
+  </svg>`;
+  const reportSubtitle = [title+filterLabel, monthStr?monthStr.replace(' · ',''):''].filter(Boolean).join(' · ');
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>${title}${filterLabel}${monthStr}</title>
+    <title>Business Mastermind — Report</title>
     <style>
-      body{font-family:Arial,sans-serif;padding:32px;color:#000;max-width:960px;margin:0 auto}
-      h1{font-size:22px;margin-bottom:4px}
-      .meta{color:#555;font-size:12px;margin-bottom:24px}
+      @page{margin:0}
+      body{font-family:Arial,sans-serif;margin:1.5cm;color:#000;max-width:960px}
+      .rpt-header{display:flex;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #ddd}
+      .rpt-brand{display:flex;align-items:center}
+      .rpt-brand-text{display:inline-block;vertical-align:middle}
+      .rpt-brand-name{font-size:18px;font-weight:800;color:#0f0f1a;display:block}
+      .rpt-brand-date{font-size:12px;color:#555;display:block;margin-top:2px}
+      .rpt-subtitle{font-size:11px;color:#777;margin-bottom:20px}
       table{width:100%;border-collapse:collapse}
       th{background:#f0f0f0;padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #ccc}
       td{padding:9px 12px;border-bottom:1px solid #e0e0e0;font-size:13px}
       tfoot td{font-weight:bold;background:#f0f0f0;border-top:2px solid #bbb}
-      @media print{body{padding:0}}
     </style></head><body>
-    <h1>${title}${filterLabel}</h1>
-    <div class="meta">Generated: ${new Date().toLocaleDateString('en-GB')}${monthStr} · ${subMode==='separated'?'Separated by sub-client':'Combined view'}</div>
+    <div class="rpt-header">
+      <div class="rpt-brand">
+        ${logoSvg}
+        <span class="rpt-brand-text">
+          <span class="rpt-brand-name">Business Mastermind</span>
+          <span class="rpt-brand-date">${new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'})}</span>
+        </span>
+      </div>
+    </div>
+    ${reportSubtitle ? `<div class="rpt-subtitle">${reportSubtitle}</div>` : ''}
     ${bodyHtml}
     <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`;
@@ -3989,4 +4004,10 @@ async function init() {
   setTimeout(() => renderView(currentView), 300);
 }
 
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  init().catch(err => {
+    console.error('App init failed:', err);
+    // Recover: render dashboard with whatever state loaded so far
+    try { navigate('dashboard'); } catch(_) {}
+  });
+});
