@@ -3401,38 +3401,37 @@ function executePrintReport(clientId, month, subMode, payFilter) {
     </tr></tfoot></table>`;
   }
 
-  const logoSvg = `<svg width="36" height="36" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:middle;margin-right:10px">
-    <rect width="34" height="34" rx="9" fill="#0f0f1a"/>
-    <path d="M23 13C23 10.79 21.21 9 19 9H15C12.79 9 11 10.79 11 13C11 15.21 12.79 17 15 17H19C21.21 17 23 18.79 23 21C23 23.21 21.21 25 19 25H15C12.79 25 11 23.21 11 21" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <path d="M17 3.5L13.5 8H16.5V11.5H17.5V8H20.5L17 3.5Z" fill="white"/>
+  // Build client avatar (coloured circle with initials)
+  const avatarColor  = client?.color || '#6366f1';
+  const avatarText   = isAll ? 'ALL' : initials(client?.name||title);
+  const avatarSvg    = `<svg width="52" height="52" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:middle;margin-right:14px;flex-shrink:0">
+    <circle cx="26" cy="26" r="26" fill="${avatarColor}"/>
+    <text x="26" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="white">${avatarText}</text>
   </svg>`;
-  const reportSubtitle = [title+filterLabel, monthStr?monthStr.replace(' · ',''):''].filter(Boolean).join(' · ');
+  const exportedDate = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});
+  const reportMonth  = month ? monthLabel(month) : '';
+
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Business Mastermind — Report</title>
+    <title>${title} — ${reportMonth}</title>
     <style>
       @page{margin:0}
       body{font-family:Arial,sans-serif;margin:1.5cm;color:#000;max-width:960px}
-      .rpt-header{display:flex;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #ddd}
-      .rpt-brand{display:flex;align-items:center}
-      .rpt-brand-text{display:inline-block;vertical-align:middle}
-      .rpt-brand-name{font-size:18px;font-weight:800;color:#0f0f1a;display:block}
-      .rpt-brand-date{font-size:12px;color:#555;display:block;margin-top:2px}
-      .rpt-subtitle{font-size:11px;color:#777;margin-bottom:20px}
+      .rpt-header{display:flex;align-items:center;margin-bottom:28px}
+      .rpt-info{display:flex;flex-direction:column;justify-content:center}
+      .rpt-client-name{font-size:22px;font-weight:800;color:#0f0f1a;line-height:1.2}
+      .rpt-meta{font-size:13px;color:#555;margin-top:4px}
       table{width:100%;border-collapse:collapse}
       th{background:#f0f0f0;padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #ccc}
       td{padding:9px 12px;border-bottom:1px solid #e0e0e0;font-size:13px}
       tfoot td{font-weight:bold;background:#f0f0f0;border-top:2px solid #bbb}
     </style></head><body>
     <div class="rpt-header">
-      <div class="rpt-brand">
-        ${logoSvg}
-        <span class="rpt-brand-text">
-          <span class="rpt-brand-name">Business Mastermind</span>
-          <span class="rpt-brand-date">${new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'})}</span>
-        </span>
+      ${avatarSvg}
+      <div class="rpt-info">
+        <div class="rpt-client-name">${title}${filterLabel}</div>
+        <div class="rpt-meta">${[reportMonth, 'Exported '+exportedDate].filter(Boolean).join(' · ')}</div>
       </div>
     </div>
-    ${reportSubtitle ? `<div class="rpt-subtitle">${reportSubtitle}</div>` : ''}
     ${bodyHtml}
     <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`;
