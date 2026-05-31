@@ -3401,13 +3401,18 @@ function executePrintReport(clientId, month, subMode, payFilter) {
     </tr></tfoot></table>`;
   }
 
-  // Build client avatar (coloured circle with initials)
-  const avatarColor  = client?.color || '#6366f1';
-  const avatarText   = isAll ? 'ALL' : initials(client?.name||title);
-  const avatarSvg    = `<svg width="52" height="52" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:middle;margin-right:14px;flex-shrink:0">
-    <circle cx="26" cy="26" r="26" fill="${avatarColor}"/>
-    <text x="26" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="white">${avatarText}</text>
-  </svg>`;
+  // Build client avatar — use uploaded photo if available, else coloured circle
+  const avatarHtml = (() => {
+    if (!isAll && client?.image) {
+      return `<img src="${client.image}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;display:inline-block;vertical-align:middle;margin-right:14px;flex-shrink:0" />`;
+    }
+    const avatarColor = client?.color || '#6366f1';
+    const avatarText  = isAll ? 'ALL' : initials(client?.name||title);
+    return `<svg width="52" height="52" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:middle;margin-right:14px;flex-shrink:0">
+      <circle cx="26" cy="26" r="26" fill="${avatarColor}"/>
+      <text x="26" y="32" text-anchor="middle" font-family="Arial,sans-serif" font-size="18" font-weight="700" fill="white">${avatarText}</text>
+    </svg>`;
+  })();
   const exportedDate = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});
   const reportMonth  = month ? monthLabel(month) : '';
 
@@ -3426,7 +3431,7 @@ function executePrintReport(clientId, month, subMode, payFilter) {
       tfoot td{font-weight:bold;background:#f0f0f0;border-top:2px solid #bbb}
     </style></head><body>
     <div class="rpt-header">
-      ${avatarSvg}
+      ${avatarHtml}
       <div class="rpt-info">
         <div class="rpt-client-name">${title}${filterLabel}</div>
         <div class="rpt-meta">${[reportMonth, 'Exported '+exportedDate].filter(Boolean).join(' · ')}</div>
