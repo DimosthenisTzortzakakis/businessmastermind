@@ -229,19 +229,28 @@ async function loadData() {
   loadUIState();
 }
 
-// Remove duplicate income entries that share the same clientId+date+subClient.
-// Keeps the most recent entry (by createdAt). Caused by service-name mismatches
-// during saveQEGrid upsert lookups. Safe to run on every load.
+// Remove duplicate income entries sharing the same clientId+date+subClient.
+// Priority: Pending > Paid (keep the Pending one). Tiebreak: newer createdAt.
+// After cleaning, bumps lastModified and schedules a Firebase push so the
+// cleanup propagates to the cloud and autoPull can't re-introduce deleted entries.
 function deduplicateIncome() {
-  const seen = new Map();
+  const seen = new Map(); // key → index of the entry we want to keep
   const toRemove = new Set();
+
+  function isBetter(a, b) {
+    // Pending beats Paid; then newer createdAt wins
+    if (a.status === 'Pending' && b.status !== 'Pending') return true;
+    if (b.status === 'Pending' && a.status !== 'Pending') return false;
+    return (a.createdAt||0) >= (b.createdAt||0);
+  }
+
   state.income.forEach((e, i) => {
     const key = (e.clientId||'') + '|' + (e.date||'') + '|' + (e.subClient||'');
     if (seen.has(key)) {
-      const prev = seen.get(key);
-      // Keep whichever has the later createdAt; mark the other for removal
-      if ((e.createdAt||0) >= (state.income[prev].createdAt||0)) {
-        toRemove.add(prev);
+      const prevIdx = seen.get(key);
+      const prev = state.income[prevIdx];
+      if (isBetter(e, prev)) {
+        toRemove.add(prevIdx);
         seen.set(key, i);
       } else {
         toRemove.add(i);
@@ -250,10 +259,15 @@ function deduplicateIncome() {
       seen.set(key, i);
     }
   });
+
   if (toRemove.size > 0) {
     console.log('Dedup: removed', toRemove.size, 'duplicate income entries');
     state.income = state.income.filter((_, i) => !toRemove.has(i));
-    idbSet(STORAGE_KEY, state); // persist the cleaned data immediately
+    // Bump timestamp so autoPull sees local as newer than cloud
+    state.lastModified = Date.now();
+    idbSet(STORAGE_KEY, state);
+    // Push cleaned data to Firebase so deleted entries don't come back
+    scheduleAutoPush();
   }
 }
 
