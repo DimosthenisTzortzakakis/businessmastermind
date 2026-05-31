@@ -3658,7 +3658,11 @@ function scheduleAutoPush() {
 
 async function autoPush(silent, keepalive = false) {
   if (!syncBlobId || !fbUrl) return;
-  if (_isSyncing && !keepalive) return;
+  if (_isSyncing && !keepalive) {
+    // Another sync is running — retry once it finishes
+    setTimeout(() => { if (_pendingPush) autoPush(true); }, 1500);
+    return;
+  }
   _isSyncing = true;
   setSyncIndicator('pushing');
   try {
@@ -3701,6 +3705,9 @@ function emergencyPush() {
 
 async function autoPull(silent) {
   if (!syncBlobId || !fbUrl || _isSyncing) return;
+  // If we have local changes not yet pushed, push first — never let a pull
+  // overwrite a pending local delete/edit
+  if (_pendingPush) { autoPush(true); return; }
   _isSyncing = true;
   setSyncIndicator('pulling');
   try {
