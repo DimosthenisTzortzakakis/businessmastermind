@@ -1601,10 +1601,16 @@ function restoreQEGridData() {
   loadQEFromState(table);
 
   // Layer 2: overlay in-session edits (higher priority — includes cleared values)
+  // Skip empty sentinels for numeric cells when the input already has a real value
+  // from Layer 1 (prevents stale blank sentinels from wiping out saved amounts)
   table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
     const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
     if (key in qeGridData) {
-      inp.value = qeGridData[key];
+      const sentinel = qeGridData[key];
+      const isNumeric = ['qty','price','subqty','subprice'].includes(inp.dataset.type);
+      // Skip empty sentinel if Layer 1 already loaded a real value for this cell
+      if (isNumeric && sentinel === '' && inp.value !== '') return;
+      inp.value = sentinel;
       if (inp.dataset.type === 'subnote') {
         const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
         const visible = visKey in qeGridData ? !!qeGridData[visKey] : (inp.value !== '');
@@ -1640,6 +1646,15 @@ function restoreQEGridData() {
     ct.style.fontWeight = '700';
     ct.title = hasPending ? 'Pending — tap to mark Paid' : 'Paid — tap to mark Pending';
   });
+}
+
+// Clears stale QE draft cache and reloads grid from saved income entries.
+// Use when grid appears empty but data exists in the income records.
+function reloadQEFromData() {
+  qeGridData = {};
+  idbSet(QE_GRID_KEY, {});
+  renderQEIncome(document.getElementById('qeContent'));
+  showToast('✓ Grid reloaded from saved data');
 }
 
 function renderQEIncome(cont) {
@@ -1775,6 +1790,10 @@ function renderQEIncome(cont) {
             <option value="Paid" ${qeGridStatus==='Paid'?'selected':''}>Paid</option>
             <option value="Pending" ${qeGridStatus==='Pending'?'selected':''}>Pending</option>
           </select>
+        </div>
+        <div class="qe-ctrl-field">
+          <label class="qe-ctrl-label">&nbsp;</label>
+          <button class="btn-secondary" style="padding:7px 12px;font-size:12px;white-space:nowrap" onclick="reloadQEFromData()" title="Reload grid values from saved income entries (fixes empty grid)"><i class="fa-solid fa-rotate-right"></i> Reload Data</button>
         </div>
       </div>
       <div class="qe-client-row">
