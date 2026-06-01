@@ -2796,3 +2796,45 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .topbar-sync-dot.cs-pulling { background: #60a5fa; animation: pulse-dot .8s ease-in-out infinite; }
 .topbar-sync-dot.cs-ok      { background: #34d399; }
 .topbar-sync-dot.cs-error   { background: #f87171; animation: pulse-dot 1s ease-in-out infinite; }
+
+/* Bulk action bar */
+.bulk-action-bar {
+  position: fixed;
+  bottom: calc(var(--bottom-nav-h) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 200;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  white-space: nowrap;
+}
+.bulk-count { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-right: 4px; }
+.bulk-btn {
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.bulk-btn:hover { opacity: 0.8; }
+.bulk-btn.bulk-paid  { background: var(--green-light); border-color: var(--green); color: var(--green); }
+.bulk-btn.bulk-pending { background: var(--amber-light); border-color: var(--amber); color: var(--amber); }
+.bulk-btn.bulk-del   { background: var(--red-light); border-color: var(--red); color: var(--red); }
+.bulk-btn.bulk-cancel { background: transparent; font-size: 14px; }
+.bulk-cb { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; margin-right: 4px; }
+.bulk-selected { background: rgba(99,102,241,0.08) !important; }
+.sl-paiddate { font-size: 10px; color: var(--green); opacity: 0.8; margin-left: 4px; }
+
+@media (min-width: 769px) {
+  .bulk-action-bar { bottom: 20px; left: calc(var(--sidebar-width) + 50%); transform: translateX(-50%); }
+}

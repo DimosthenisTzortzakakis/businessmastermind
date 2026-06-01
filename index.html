@@ -77,7 +77,7 @@
       <div class="kpi-grid" id="kpiGrid"></div>
       <div class="recurring-banner" id="recurringBanner" style="display:none">
         <i class="fa-solid fa-rotate"></i>
-        <span>Some recurring entries haven't been added for <strong id="recurBannerMonth"></strong> yet.</span>
+        <span><strong id="recurBannerCount">0</strong> recurring entries not yet added for <strong id="recurBannerMonth"></strong>.</span>
         <button onclick="generateRecurring()"><i class="fa-solid fa-plus"></i> Generate Now</button>
       </div>
       <div class="vat-summary" id="vatSummary"></div>
@@ -95,6 +95,7 @@
       <div class="stats-charts-row">
         <div class="chart-card"><div class="chart-card-title">Revenue by Client</div><div class="chart-wrapper"><canvas id="chartByClient"></canvas></div></div>
         <div class="chart-card"><div class="chart-card-title">Monthly Income vs Expenses</div><div class="chart-wrapper"><canvas id="chartMonthly"></canvas></div></div>
+        <div class="chart-card"><div class="chart-card-title">Expenses by Category</div><div class="chart-wrapper"><canvas id="chartExpCat"></canvas></div></div>
       </div>
       <div class="stats-tables-row" id="statsTablesRow"></div>
     </section>
@@ -102,6 +103,14 @@
     <!-- INCOME -->
     <section class="view hidden" id="view-income">
       <div id="incomeList"></div>
+      <div class="bulk-action-bar" id="incomeBulkBar" style="display:none">
+        <span class="bulk-count" id="bulkSelCount">0 selected</span>
+        <button class="bulk-btn" onclick="selectAllIncomeVisible()"><i class="fa-solid fa-check-double"></i> All</button>
+        <button class="bulk-btn bulk-paid" onclick="bulkMarkIncome('Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>
+        <button class="bulk-btn bulk-pending" onclick="bulkMarkIncome('Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
+        <button class="bulk-btn bulk-del" onclick="bulkDeleteIncome()"><i class="fa-solid fa-trash"></i> Delete</button>
+        <button class="bulk-btn bulk-cancel" onclick="exitIncBulkMode()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
     </section>
 
     <!-- EXPENSES -->

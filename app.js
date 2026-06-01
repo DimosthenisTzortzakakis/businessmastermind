@@ -177,6 +177,10 @@ let qeGridData = {}; // persistent grid state: key = "type|clientId|date|sub", v
 let qeExpenseGridData = {}; // expense QE: { date: [{id,category,amount,note}] }
 let qeExpPayMethod = 'Cash';
 
+// Bulk select state — income
+let incBulkMode = false;
+let incSelectedIds = new Set();
+
 // Form state
 let incomePaymentType = 'invoice';
 let incomeStatus      = 'Paid';
@@ -202,6 +206,7 @@ let pendingDeleteId   = null;
 // Charts
 let chartByClient = null;
 let chartMonthly  = null;
+let chartExpCat   = null;
 
 // ── Persistence ────────────────────────────────────────────────
 async function loadData() {
@@ -1213,13 +1218,22 @@ function saveIncome() {
 
   if (editingEntryId) {
     const idx = state.income.findIndex(e=>e.id===editingEntryId);
-    if (idx>=0) state.income[idx] = { ...state.income[idx], clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice };
+    if (idx>=0) {
+      const prev = state.income[idx];
+      let paidDate = prev.paidDate;
+      if (incomeStatus === 'Paid' && !paidDate) paidDate = Date.now();
+      else if (incomeStatus !== 'Paid') paidDate = undefined;
+      const updated = { ...prev, clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice };
+      if (paidDate) updated.paidDate = paidDate; else delete updated.paidDate;
+      state.income[idx] = updated;
+    }
     editingEntryId = null; editingEntryType = null;
     saveData();
     closeAllModals();
     showToast('Income entry updated');
   } else {
     const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
+    if (incomeStatus === 'Paid') entry.paidDate = Date.now();
     try {
       state.income.push(entry);
       saveData();
@@ -1357,6 +1371,7 @@ function openEntryDetail(type, id) {
       ${e.vatAmount>0?`<div class="ed-row"><span>VAT</span><strong>${fmt(e.vatAmount)}</strong></div>`:''}
       <div class="ed-row"><span>Date</span><strong>${toDateStr(e.date)}</strong></div>
       <div class="ed-row"><span>Status</span><strong>${e.status}</strong></div>
+      ${e.paidDate?`<div class="ed-row"><span>Paid on</span><strong style="color:var(--green)">${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</strong></div>`:''}
       <div class="ed-row"><span>Type</span><strong>${e.paymentType==='invoice'?'Invoice':'Cash'}</strong></div>
       ${e.recurring?'<div class="ed-row"><span>Recurring</span><strong>Yes</strong></div>':''}
       ${e.notes?`<div class="ed-row"><span>Notes</span><strong>${e.notes}</strong></div>`:''}`;
@@ -2433,19 +2448,28 @@ function renderDashboard() {
     <div class="kpi-card red kpi-clickable" onclick="navigate('expenses')" title="Go to Expenses"><div class="kpi-icon"><i class="fa-solid fa-arrow-trend-down"></i></div><div class="kpi-label">Expenses</div><div class="kpi-value">${fmt(totalExp)}</div></div>
     <div class="kpi-card blue"><div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div><div class="kpi-label">Net Profit</div><div class="kpi-value" style="color:${netProfit>=0?'var(--green)':'var(--red)'}">${fmt(netProfit)}</div></div>`;
 
-  // Recurring prompt — show button if any recurring entries haven't been generated yet for current month
+  // Recurring prompt — count missing recurring entries for current month
   const curMonth = todayVal().slice(0,7);
-  const missingInc = state.income.filter(e=>e.recurring).some(e=>{
-    return !state.income.some(x=>x.recurring&&x.clientId===e.clientId&&x.service===e.service&&monthKey(x.date)===curMonth);
-  });
-  const missingExp = state.expenses.filter(e=>e.recurring).some(e=>{
-    return !state.expenses.some(x=>x.recurring&&x.category===e.category&&x.vendor===e.vendor&&monthKey(x.date)===curMonth);
-  });
+  const recurringIncEntries = state.income.filter(e=>e.recurring);
+  const missingInc = recurringIncEntries.filter(e =>
+    !state.income.some(x => x.clientId===e.clientId && x.service===e.service && monthKey(x.date)===curMonth)
+  );
+  const missingIncUnique = [...new Map(missingInc.map(e=>[e.clientId+'|'+e.service, e])).values()];
+
+  const recurringExpEntries = state.expenses.filter(e=>e.recurring);
+  const missingExp = recurringExpEntries.filter(e =>
+    !state.expenses.some(x => x.category===e.category && x.vendor===e.vendor && monthKey(x.date)===curMonth)
+  );
+  const missingExpUnique = [...new Map(missingExp.map(e=>[e.category+'|'+e.vendor, e])).values()];
+
+  const totalMissing = missingIncUnique.length + missingExpUnique.length;
   const recurBanner = document.getElementById('recurringBanner');
   if (recurBanner) {
-    recurBanner.style.display = (missingInc||missingExp) ? '' : 'none';
+    recurBanner.style.display = totalMissing > 0 ? '' : 'none';
     const ml = document.getElementById('recurBannerMonth');
     if (ml) ml.textContent = monthLabel(curMonth);
+    const countEl = document.getElementById('recurBannerCount');
+    if (countEl) countEl.textContent = totalMissing;
   }
 
   // VAT
@@ -2519,6 +2543,7 @@ function setDashMonth(m) { dashMonth=m; saveUIState(); renderDashboard(); }
 function renderStatistics(filteredInc) {
   if (chartByClient) { chartByClient.destroy(); chartByClient=null; }
   if (chartMonthly)  { chartMonthly.destroy();  chartMonthly=null;  }
+  if (chartExpCat)   { chartExpCat.destroy();   chartExpCat=null;   }
 
   if (typeof Chart === 'undefined') return;
 
@@ -2575,6 +2600,29 @@ function renderStatistics(filteredInc) {
     barCtx.parentElement.innerHTML='<div class="chart-empty">No monthly data yet</div>';
   }
 
+  // Expenses by category doughnut
+  const byCatExp = {};
+  state.expenses.forEach(e => { byCatExp[e.category] = (byCatExp[e.category]||0) + e.amount; });
+  const catEntries = Object.entries(byCatExp).sort((a,b) => b[1]-a[1]);
+  const expCatCtx = document.getElementById('chartExpCat');
+  const catColors = ['#ef4444','#f97316','#f59e0b','#84cc16','#10b981','#06b6d4','#6366f1','#8b5cf6','#ec4899','#64748b'];
+  if (expCatCtx && catEntries.length) {
+    chartExpCat = new Chart(expCatCtx, {
+      type:'doughnut',
+      data:{
+        labels: catEntries.map(([n])=>n),
+        datasets:[{ data: catEntries.map(([,v])=>v),
+          backgroundColor: catEntries.map((_,i)=>catColors[i%catColors.length]),
+          borderWidth:2, borderColor:'#13132a' }]
+      },
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8',font:{size:11,family:'Inter'},padding:8,boxWidth:12 } },
+          tooltip:{ callbacks:{ label:ctx=>` ${ctx.label}: ${fmt(ctx.raw)}` } } } }
+    });
+  } else if (expCatCtx) {
+    expCatCtx.parentElement.innerHTML='<div class="chart-empty">No expense data yet</div>';
+  }
+
   // Stats tables
   const topClients = Object.entries(byClient).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const bySvc={};
@@ -2612,6 +2660,65 @@ function renderStatistics(filteredInc) {
     </div>`;
 }
 
+// ── Bulk Select — Income ───────────────────────────────────────
+function toggleIncBulkMode() {
+  incBulkMode = !incBulkMode;
+  if (!incBulkMode) incSelectedIds = new Set();
+  renderIncome();
+  updateIncomeBulkBar();
+}
+function exitIncBulkMode() {
+  incBulkMode = false;
+  incSelectedIds = new Set();
+  renderIncome();
+  updateIncomeBulkBar();
+}
+function toggleSelectIncome(id, e) {
+  if (e) e.stopPropagation();
+  if (incSelectedIds.has(id)) incSelectedIds.delete(id);
+  else incSelectedIds.add(id);
+  updateIncomeBulkBar();
+  const cb = document.querySelector(`.bulk-cb[data-id="${id}"]`);
+  if (cb) cb.checked = incSelectedIds.has(id);
+  const row = document.querySelector(`[data-bulk-id="${id}"]`);
+  if (row) row.classList.toggle('bulk-selected', incSelectedIds.has(id));
+}
+function selectAllIncomeVisible() {
+  document.querySelectorAll('[data-bulk-id]').forEach(el => incSelectedIds.add(el.dataset.bulkId));
+  updateIncomeBulkBar();
+  document.querySelectorAll('.bulk-cb').forEach(cb => { cb.checked = true; });
+  document.querySelectorAll('[data-bulk-id]').forEach(el => el.classList.add('bulk-selected'));
+}
+function updateIncomeBulkBar() {
+  const bar = document.getElementById('incomeBulkBar');
+  if (!bar) return;
+  bar.style.display = incBulkMode ? 'flex' : 'none';
+  const cnt = document.getElementById('bulkSelCount');
+  if (cnt) cnt.textContent = `${incSelectedIds.size} selected`;
+}
+function bulkMarkIncome(status) {
+  if (!incSelectedIds.size) { showToast('Select entries first','error'); return; }
+  const now = Date.now();
+  state.income.forEach(e => {
+    if (incSelectedIds.has(e.id)) {
+      e.status = status;
+      if (status === 'Paid') e.paidDate = now;
+      else delete e.paidDate;
+    }
+  });
+  saveData();
+  showToast(`${incSelectedIds.size} entries marked ${status}`);
+  exitIncBulkMode();
+}
+function bulkDeleteIncome() {
+  if (!incSelectedIds.size) { showToast('Select entries first','error'); return; }
+  if (!confirm(`Delete ${incSelectedIds.size} selected entries?`)) return;
+  state.income = state.income.filter(e => !incSelectedIds.has(e.id));
+  saveData();
+  showToast(`${incSelectedIds.size} entries deleted`);
+  exitIncBulkMode();
+}
+
 // ── RENDER: Income ─────────────────────────────────────────────
 function renderIncome() {
   const cont = document.getElementById('incomeList');
@@ -2637,7 +2744,7 @@ function renderIncome() {
   </div>`;
 
   const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('detailed','list-ul','Detailed')}${vtInc('cards','grip','Cards')}${vtInc('excel','table','Excel')}</div></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('detailed','list-ul','Detailed')}${vtInc('cards','grip','Cards')}${vtInc('excel','table','Excel')}</div><button class="vtb ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Bulk select"><i class="fa-solid fa-check-square"></i><span class="vtb-label">Select</span></button></div>`;
 
   let entries = [...state.income];
   if (incMonth!=='all')   entries=entries.filter(e=>monthKey(e.date)===incMonth);
@@ -2680,7 +2787,8 @@ function renderIncome() {
           : `<span class="entry-client-dot" style="background:${c?.color||'#888'};width:30px;height:30px;border-radius:50%;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff">${initials(c?.name||'?')}</span>`;
         const entriesHtml = grp.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(e=>{
           const sl=e.status.toLowerCase();
-          return `<div class="entry-compact ${sl}" onclick="openEntryDetail('income','${e.id}')">
+          return `<div class="entry-compact ${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
+            ${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:'' }
             <span class="ec-date">${toDateStr(e.date)}</span>
             <span class="ec-sep">·</span>
             <span class="ec-service">${e.service}${e.subClient?` <em style="opacity:.6">· ${e.subClient}</em>`:''}</span>
@@ -2716,8 +2824,8 @@ function renderIncome() {
     const totalAll  = entries.reduce((s,e)=>s+e.amount,0);
     const rows = entries.map((e,i)=>{
       const c=clientById(e.clientId); const sl=e.status.toLowerCase();
-      return `<tr class="xls-row-${sl}">
-        <td class="xls-idx">${i+1}</td>
+      return `<tr class="xls-row-${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:''}">
+        <td class="xls-idx">${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:`${i+1}`}</td>
         <td>${toDateStr(e.date)}</td>
         <td style="color:${c?.color||'var(--text)'}"><strong>${c?.name||'?'}</strong></td>
         <td>${e.subClient||'—'}</td>
@@ -2761,7 +2869,8 @@ function renderIncome() {
       html+='<div class="entries-cards-grid">';
       grp.forEach(e=>{
         const c=clientById(e.clientId); const sl=e.status.toLowerCase();
-        html+=`<div class="entry-card ${sl}" onclick="openEntryDetail('income','${e.id}')">
+        html+=`<div class="entry-card ${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
+          ${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)" style="margin:0 0 6px 0">`:'' }
           <div class="entry-card-top" style="border-left:3px solid ${c?.color||'#888'}">
             <span class="entry-card-client">${c?.name||'?'}</span>
             <span class="entry-card-amount">${fmt(e.amount)}</span>
@@ -2780,10 +2889,11 @@ function renderIncome() {
       html += '<div class="simple-list">';
       grp.forEach(e=>{
         const c=clientById(e.clientId); const sl=e.status.toLowerCase();
-        html+=`<div class="sl-row ${sl}" onclick="openEntryDetail('income','${e.id}')">
+        html+=`<div class="sl-row ${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
+          ${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:'' }
           <span class="sl-date">${toDateStr(e.date)}</span>
           <span class="sl-client" style="color:${c?.color||'var(--text)'}">${c?.name||'Unknown'}</span>
-          <span class="sl-amount ${sl}">${fmt(e.amount)}</span>
+          <span class="sl-amount ${sl}">${fmt(e.amount)}${e.paidDate?`<span class="sl-paiddate">Paid ${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</span>`:''}</span>
           ${eaInc(e.id)}
         </div>`;
       });
@@ -2792,6 +2902,7 @@ function renderIncome() {
     html+='</div>';
   });
   cont.innerHTML = html;
+  updateIncomeBulkBar();
 }
 
 function setIncFilter(t,v){ if(t==='month')incMonth=v; if(t==='client')incClient=v; if(t==='status')incStatus=v; if(t==='paytype')incPayType=v; renderIncome(); }
