@@ -1671,9 +1671,18 @@ function restoreQEGridData() {
     );
     if (!entries.length) return;
     const hasPending = entries.some(e=>e.status==='Pending');
-    ct.style.color      = hasPending ? '#f59e0b' : 'var(--green)';
+    // If there is an unsaved draft value for this cell (any numeric qeGridData key
+    // for this client+date that is non-empty), keep orange — the draft is pending
+    // regardless of what the saved entry status says.
+    const hasDraft = Object.keys(qeGridData).some(k => {
+      const p = k.split('|');
+      return ['price','qty','subqty','subprice'].includes(p[0]) &&
+             p[1] === cid && p[2] === ds && qeGridData[k] !== '';
+    });
+    const isOrange = hasPending || hasDraft;
+    ct.style.color      = isOrange ? '#f59e0b' : 'var(--green)';
     ct.style.fontWeight = '700';
-    ct.title = hasPending ? 'Pending — tap to mark Paid' : 'Paid — tap to mark Pending';
+    ct.title = isOrange ? 'Pending — tap to mark Paid' : 'Paid — tap to mark Pending';
   });
 }
 
@@ -2031,13 +2040,17 @@ function updateQEColTotals() {
     table.querySelectorAll('.qe-client-total[data-client="'+cid+'"]').forEach(c=>{ col += parseFloat(c.dataset.value)||0; });
     foot.textContent = col > 0 ? fmt(col) : '—';
     grand += col;
-    // Color by payment status for this client
+    // Color by payment status — orange if any pending, any draft, or no saved status yet
     const clientStatus = getQEClientStatus(cid);
-    if (clientStatus) {
-      foot.style.color      = clientStatus === 'Pending' ? '#f59e0b' : 'var(--green)';
+    const hasDraftForClient = Object.keys(qeGridData).some(k => {
+      const p = k.split('|');
+      return ['price','qty','subqty','subprice'].includes(p[0]) &&
+             p[1] === cid && qeGridData[k] !== '';
+    });
+    if (clientStatus === 'Paid' && !hasDraftForClient) {
+      foot.style.color      = 'var(--green)';
       foot.style.fontWeight = '700';
-    } else if (col > 0) {
-      // Has draft (unsaved) values — show orange by default
+    } else if (col > 0 || clientStatus) {
       foot.style.color      = '#f59e0b';
       foot.style.fontWeight = '700';
     } else {
@@ -3841,6 +3854,10 @@ async function autoPull(silent) {
       return;
     }
 
+    // Snapshot IDs before merge so we can detect real changes
+    const prevIncomeIds = new Set((state.income || []).map(e => e.id));
+    const prevExpIds    = new Set((state.expenses || []).map(e => e.id));
+
     // Merge: keep any local entries that cloud doesn't have (by id)
     const cloudIncomeIds   = new Set(cloudIncome.map(e => e.id));
     const cloudExpenseIds  = new Set(cloudExpenses.map(e => e.id));
@@ -3858,7 +3875,20 @@ async function autoPull(silent) {
     if (localOnlyIncome.length || localOnlyExpense.length) {
       scheduleAutoPush();
     }
-    navigate(currentView);
+    // Only re-render if entry IDs actually changed — avoids constant flickering
+    // from 15-second autoPull when data hasn't moved
+    const incChanged = state.income.some(e => !prevIncomeIds.has(e.id)) ||
+                       [...prevIncomeIds].some(id => !cloudIncomeIds.has(id) && !localOnlyIncome.find(e=>e.id===id));
+    const expChanged = state.expenses.some(e => !prevExpIds.has(e.id)) ||
+                       [...prevExpIds].some(id => !cloudExpenseIds.has(id) && !localOnlyExpense.find(e=>e.id===id));
+    // Also check if any entry statuses/amounts changed in cloud data
+    const statusChanged = cloudIncome.some(e => {
+      const local = (state.income||[]).find(x => x.id === e.id);
+      return local && (local.status !== e.status || local.amount !== e.amount);
+    });
+    if (incChanged || expChanged || statusChanged || !silent) {
+      navigate(currentView);
+    }
     setSyncIndicator('ok');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
     if (!silent) showToast('☁ Updated from cloud');
