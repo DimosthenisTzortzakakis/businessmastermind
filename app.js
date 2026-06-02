@@ -3131,14 +3131,17 @@ function openClientDetail(clientId) {
 
 // ── RENDER: Reports ────────────────────────────────────────────
 function renderReports() {
-  const agency = state.clients.filter(c=>c.type==='Agency');
   const months = allMonths();
+  // Agency clients first, then Direct — both are valid for reports
+  const agencyClients = state.clients.filter(c=>c.type==='Agency');
+  const directClients = state.clients.filter(c=>c.type==='Direct');
   document.getElementById('reportsContainer').innerHTML = `
     <div class="report-controls">
       <select class="form-select" id="reportClient" onchange="renderReportTable()">
         <option value="">Select Client…</option>
         <option value="__all__">📊 All My Income</option>
-        ${agency.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+        ${agencyClients.length ? `<optgroup label="Agency">${agencyClients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</optgroup>` : ''}
+        ${directClients.length ? `<optgroup label="Direct">${directClients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</optgroup>` : ''}
       </select>
       <select class="form-select" id="reportMonth" onchange="renderReportTable()">
         <option value="">All Months</option>
@@ -3153,7 +3156,7 @@ function renderReports() {
       <button class="report-type-tab ${reportSubMode==='combined'?'active':''}" onclick="setReportSubMode('combined')"><i class="fa-solid fa-layer-group"></i> Combined</button>
       <button class="report-type-tab ${reportSubMode==='separated'?'active':''}" onclick="setReportSubMode('separated')"><i class="fa-solid fa-list-ul"></i> Separated</button>
     </div>
-    <div id="reportTableArea"><div class="report-empty">Select an agency client to view sub-client breakdown</div></div>`;
+    <div id="reportTableArea"><div class="report-empty">Select a client to view their report</div></div>`;
 }
 
 function setReportPayFilter(f) {
