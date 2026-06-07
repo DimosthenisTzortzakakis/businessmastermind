@@ -1345,6 +1345,7 @@ function saveIncome() {
     saveData();
     closeAllModals();
     showToast('Income entry updated');
+    renderView(currentView);
   } else {
     const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
     if (incomeStatus === 'Paid') entry.paidDate = Date.now();
@@ -1453,6 +1454,7 @@ function saveExpense() {
     saveData();
     closeAllModals();
     showToast('Expense entry updated');
+    renderView(currentView);
   } else {
     const entry = { id:genId(), category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, createdAt:Date.now() };
     try {
@@ -3111,7 +3113,7 @@ function renderIncome() {
   updateIncomeBulkBar();
 }
 
-function setIncFilter(t,v){ if(t==='month')incMonth=v; if(t==='client')incClient=v; if(t==='status')incStatus=v; if(t==='paytype')incPayType=v; renderIncome(); }
+function setIncFilter(t,v){ if(t==='month')incMonth=v; if(t==='client')incClient=v; if(t==='status')incStatus=v; if(t==='paytype')incPayType=v; saveUIState(); renderIncome(); }
 
 // ── RENDER: Expenses ───────────────────────────────────────────
 function renderExpenses() {
@@ -3260,7 +3262,7 @@ function renderExpenses() {
   cont.innerHTML = html;
 }
 
-function setExpFilter(t,v){ if(t==='month')expMonth=v; if(t==='category')expCategory=v; renderExpenses(); }
+function setExpFilter(t,v){ if(t==='month')expMonth=v; if(t==='category')expCategory=v; saveUIState(); renderExpenses(); }
 
 // ── RENDER: Clients ────────────────────────────────────────────
 function renderClients() {
