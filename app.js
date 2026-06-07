@@ -1282,7 +1282,36 @@ function saveIncome() {
     const invAmt  = parseFloat(document.getElementById('splitInvoiceAmt').value)||0;
     const cashAmt = parseFloat(document.getElementById('splitCashAmt').value)||0;
     if (invAmt<=0 && cashAmt<=0) { showToast('Enter at least one amount','error'); return; }
-    const base = { clientId, subClient, service, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, createdAt:Date.now() };
+
+    // If editing, remove the old entry and its split companion before re-creating
+    if (editingEntryId) {
+      pushUndo('Edit split payment');
+      const oldEntry = state.income.find(e => e.id === editingEntryId);
+      if (oldEntry) {
+        // Remove both entries that belong to this split group
+        const grpId = oldEntry.splitGroupId;
+        if (grpId) {
+          state.income = state.income.filter(e => e.splitGroupId !== grpId);
+        } else {
+          // Fallback: remove by id + companion (same client+date+sub, different paymentType)
+          const companionId = state.income.find(x =>
+            x.id !== editingEntryId &&
+            x.clientId === oldEntry.clientId &&
+            x.date === oldEntry.date &&
+            (x.subClient||'') === (oldEntry.subClient||'') &&
+            x.paymentType !== oldEntry.paymentType
+          )?.id;
+          state.income = state.income.filter(e => e.id !== editingEntryId && e.id !== companionId);
+        }
+      }
+      editingEntryId = null; editingEntryType = null;
+    } else {
+      pushUndo('Add split payment');
+    }
+
+    const sgId = genId(); // shared group id links the two halves
+    const base = { clientId, subClient, service, date:rawDate, status:incomeStatus, notes,
+                   recurring:incRecurring, splitGroupId:sgId, createdAt:Date.now() };
     const entries = [];
     if (invAmt>0)  entries.push({ ...base, id:genId(), amount:invAmt,  vatAmount:invAmt*VAT_RATE, paymentType:'invoice' });
     if (cashAmt>0) entries.push({ ...base, id:genId(), amount:cashAmt, vatAmount:0,               paymentType:'cash' });
@@ -1451,16 +1480,32 @@ function openEntryDetail(type, id) {
     const e = state.income.find(x=>x.id===id); if (!e) return;
     const c = clientById(e.clientId);
     title = 'Income Details';
+    // Detect split companion
+    const splitComp = e.splitGroupId
+      ? state.income.find(x => x.splitGroupId === e.splitGroupId && x.id !== id)
+      : state.income.find(x =>
+          x.id !== id && x.clientId === e.clientId && x.date === e.date &&
+          (x.subClient||'') === (e.subClient||'') && x.paymentType !== e.paymentType &&
+          ['invoice','cash'].includes(x.paymentType)
+        );
+    const isSplit = !!splitComp;
+    const invE  = isSplit ? (e.paymentType==='invoice' ? e : splitComp) : null;
+    const cashE = isSplit ? (e.paymentType==='cash'    ? e : splitComp) : null;
     html = `
       <div class="ed-row"><span>Client</span><strong>${c?.name||'?'}</strong></div>
       ${e.subClient?`<div class="ed-row"><span>Sub-Client</span><strong>${e.subClient}</strong></div>`:''}
       <div class="ed-row"><span>Service</span><strong>${e.service}</strong></div>
-      <div class="ed-row"><span>Amount</span><strong style="color:var(--green)">${fmt(e.amount)}</strong></div>
-      ${e.vatAmount>0?`<div class="ed-row"><span>VAT</span><strong>${fmt(e.vatAmount)}</strong></div>`:''}
+      ${isSplit
+        ? `<div class="ed-row"><span>Invoice</span><strong style="color:var(--green)">${fmt(invE.amount)} <span style="opacity:.6;font-size:11px">+ VAT ${fmt(invE.vatAmount)}</span></strong></div>
+           <div class="ed-row"><span>Cash</span><strong style="color:var(--green)">${fmt(cashE.amount)}</strong></div>
+           <div class="ed-row"><span>Total</span><strong style="color:var(--green)">${fmt(invE.amount+cashE.amount)}</strong></div>
+           <div class="ed-row"><span>Type</span><strong>Split (Invoice + Cash)</strong></div>`
+        : `<div class="ed-row"><span>Amount</span><strong style="color:var(--green)">${fmt(e.amount)}</strong></div>
+           ${e.vatAmount>0?`<div class="ed-row"><span>VAT</span><strong>${fmt(e.vatAmount)}</strong></div>`:''}
+           <div class="ed-row"><span>Type</span><strong>${e.paymentType==='invoice'?'Invoice':'Cash'}</strong></div>`}
       <div class="ed-row"><span>Date</span><strong>${toDateStr(e.date)}</strong></div>
       <div class="ed-row"><span>Status</span><strong>${e.status}</strong></div>
       ${e.paidDate?`<div class="ed-row"><span>Paid on</span><strong style="color:var(--green)">${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</strong></div>`:''}
-      <div class="ed-row"><span>Type</span><strong>${e.paymentType==='invoice'?'Invoice':'Cash'}</strong></div>
       ${e.recurring?'<div class="ed-row"><span>Recurring</span><strong>Yes</strong></div>':''}
       ${e.notes?`<div class="ed-row"><span>Notes</span><strong>${e.notes}</strong></div>`:''}`;
   } else {
@@ -1509,14 +1554,40 @@ function openEditEntry(type, id) {
     selectClient(e.clientId);
     document.getElementById('incomeSubClient').value = e.subClient||'';
     document.getElementById('incomeService').value   = e.service;
-    document.getElementById('incomeAmount').value    = e.amount;
     document.getElementById('incomeNotes').value     = e.notes||'';
-    setPaymentType(e.paymentType);
     setStatus(e.status);
     setIncRecurring(e.recurring||false);
     setIncomeDateMode('exact');
     document.getElementById('incomeDate').value = e.date.slice(0,10);
-    updateVATPreview();
+
+    // Detect split pair — by splitGroupId (new) or by companion entry (legacy)
+    const companion = e.splitGroupId
+      ? state.income.find(x => x.splitGroupId === e.splitGroupId && x.id !== id)
+      : state.income.find(x =>
+          x.id !== id &&
+          x.clientId === e.clientId &&
+          x.date === e.date &&
+          (x.subClient||'') === (e.subClient||'') &&
+          x.paymentType !== e.paymentType &&
+          ['invoice','cash'].includes(x.paymentType)
+        );
+
+    if (companion) {
+      // Open in split mode with both amounts pre-filled
+      setIncSplit(true);
+      const invEntry  = e.paymentType === 'invoice' ? e : companion;
+      const cashEntry = e.paymentType === 'cash'    ? e : companion;
+      document.getElementById('splitInvoiceAmt').value = invEntry.amount;
+      document.getElementById('splitCashAmt').value    = cashEntry.amount;
+      updateSplitPreview();
+    } else {
+      // Normal single entry
+      setIncSplit(false);
+      document.getElementById('incomeAmount').value = e.amount;
+      setPaymentType(e.paymentType);
+      updateVATPreview();
+    }
+
     document.querySelector('#sheetIncome .sheet-title').textContent = 'Edit Income';
     document.querySelector('#sheetIncome .btn-save').innerHTML = '<i class="fa-solid fa-check"></i> Save Changes';
     _openSheet('sheetIncome');
