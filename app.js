@@ -301,6 +301,9 @@ function deduplicateIncome() {
   }
 
   state.income.forEach((e, i) => {
+    // Skip split-payment entries — they intentionally share clientId+date+subClient
+    // but differ by paymentType (invoice vs cash). Deduping them would delete the cash half.
+    if (e.splitGroupId) return;
     const key = (e.clientId||'') + '|' + (e.date||'') + '|' + (e.subClient||'');
     if (seen.has(key)) {
       const prevIdx = seen.get(key);
@@ -1455,6 +1458,7 @@ function saveExpense() {
     closeAllModals();
     showToast('Expense entry updated');
     renderView(currentView);
+    return;
   } else {
     const entry = { id:genId(), category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, createdAt:Date.now() };
     try {
@@ -1469,10 +1473,7 @@ function saveExpense() {
     closeAllModals();
     showToast(`✓ Expense saved — ${fmt(amount)}`);
     renderView(currentView);
-    return;
   }
-  // editing path
-  renderView(currentView);
 }
 
 // ── Entry Detail / Edit ────────────────────────────────────────
@@ -1667,6 +1668,7 @@ function doDelete() {
 // ── QUICK ENTRY ────────────────────────────────────────────────
 function setQETab(tab) {
   qeTab = tab;
+  saveUIState();
   document.getElementById('qeTabIncome').classList.toggle('active',  tab==='income');
   document.getElementById('qeTabExpense').classList.toggle('active', tab==='expense');
   renderQuickEntry();
@@ -2880,7 +2882,7 @@ function selectClientGroup(cid, e) {
   // Update the header checkbox state
   const hdrCb = group.querySelector('.bc-select-all-cb');
   if (hdrCb) { hdrCb.checked = !allSelected; hdrCb.indeterminate = false; }
-  updateBulkBar();
+  updateIncomeBulkBar();
 }
 
 function bulkMarkIncome(status) {
@@ -3877,19 +3879,20 @@ function generateRecurring(silent=false) {
   const currentMonth = todayVal().slice(0,7);
   let generated = 0;
 
-  // Income: key = clientId + service
+  // Income: key = clientId + service + subClient (subClient needed for agency multi-subclient)
   const incTemplates = new Map();
   state.income.filter(e=>e.recurring).forEach(e=>{
-    const k = e.clientId + '\x00' + e.service;
+    const k = e.clientId + '\x00' + e.service + '\x00' + (e.subClient||'');
     if (!incTemplates.has(k) || e.date > incTemplates.get(k).date) incTemplates.set(k, e);
   });
   incTemplates.forEach((tmpl, k)=>{
-    const [clientId, service] = k.split('\x00');
+    const [clientId, service, subClient] = k.split('\x00');
     const exists = state.income.some(e=>
-      e.recurring && e.clientId===clientId && e.service===service && monthKey(e.date)===currentMonth
+      e.recurring && e.clientId===clientId && e.service===service &&
+      (e.subClient||'')===(subClient||'') && monthKey(e.date)===currentMonth
     );
     if (!exists) {
-      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', status:'Pending', createdAt:Date.now() };
+      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', status:'Pending', subClient:subClient||'', createdAt:Date.now() };
       state.income.push(entry);
       sheetsAdd('income', entry);
       generated++;
@@ -4172,6 +4175,8 @@ async function cloudPull() {
     state.services = p.services || [...DEFAULT_SERVICES];
     state.lastModified = p.lastModified || Date.now();
     idbSet(STORAGE_KEY, state);
+    deduplicateIncome();
+    deduplicateExpenses();
     navigate(currentView);
     showToast('✓ Pulled from cloud');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
