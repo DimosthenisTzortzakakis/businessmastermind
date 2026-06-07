@@ -2520,7 +2520,7 @@ function renderDashboard() {
   }
 
   // VAT
-  const vatCol  = inc.filter(e=>e.status==='Paid'&&e.paymentType==='invoice').reduce((s,e)=>s+(e.vatAmount||0),0);
+  const vatCol  = inc.filter(e=>e.paymentType==='invoice').reduce((s,e)=>s+(e.vatAmount||0),0);
   const vatDed  = exp.reduce((s,e)=>s+(e.vatAmount||0),0);
   const netVAT  = vatCol-vatDed;
   document.getElementById('vatSummary').innerHTML = `
