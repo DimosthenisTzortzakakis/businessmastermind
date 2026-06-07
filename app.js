@@ -230,7 +230,8 @@ async function loadData() {
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
   pruneQEGridData();
-  deduplicateIncome(); // remove any doubled QE entries (same client+date+sub)
+  deduplicateIncome();    // remove any doubled QE entries (same client+date+sub)
+  deduplicateExpenses();  // remove any doubled recurring expense entries (same category+vendor+month)
   loadUIState();
 }
 
@@ -272,6 +273,39 @@ function deduplicateIncome() {
     state.lastModified = Date.now();
     idbSet(STORAGE_KEY, state);
     // Push cleaned data to Firebase so deleted entries don't come back
+    scheduleAutoPush();
+  }
+}
+
+// Remove duplicate recurring expense entries sharing the same category+vendor+month.
+// Non-recurring expenses are never touched (same vendor on same day is valid).
+// Priority: newer createdAt wins. After cleaning, bumps lastModified and pushes to Firebase.
+function deduplicateExpenses() {
+  const seen = new Map();    // key → index of keeper
+  const toRemove = new Set();
+
+  state.expenses.forEach((e, i) => {
+    if (!e.recurring) return; // only deduplicate recurring entries
+    const key = (e.category||'') + '|' + (e.vendor||'') + '|' + monthKey(e.date||'');
+    if (seen.has(key)) {
+      const prevIdx = seen.get(key);
+      // Keep the one with a newer createdAt
+      if ((e.createdAt||0) >= (state.expenses[prevIdx].createdAt||0)) {
+        toRemove.add(prevIdx);
+        seen.set(key, i);
+      } else {
+        toRemove.add(i);
+      }
+    } else {
+      seen.set(key, i);
+    }
+  });
+
+  if (toRemove.size > 0) {
+    console.log('Dedup: removed', toRemove.size, 'duplicate recurring expense entries');
+    state.expenses = state.expenses.filter((_, i) => !toRemove.has(i));
+    state.lastModified = Date.now();
+    idbSet(STORAGE_KEY, state);
     scheduleAutoPush();
   }
 }
@@ -3871,6 +3905,9 @@ async function autoPull(silent) {
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
+    // Remove any duplicate recurring entries that crept in via multi-device race
+    deduplicateIncome();
+    deduplicateExpenses();
     // If we had local-only entries, push the merged result back to Firebase
     if (localOnlyIncome.length || localOnlyExpense.length) {
       scheduleAutoPush();
@@ -4042,6 +4079,9 @@ async function autoPullForced() {
     state.services = p.services || [...DEFAULT_SERVICES];
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
     idbSet(STORAGE_KEY, state);
+    // Remove any duplicate recurring entries from multi-device race
+    deduplicateIncome();
+    deduplicateExpenses();
     // Push merged result back if we had local-only entries
     if (localOnlyIncome.length || localOnlyExpense.length) scheduleAutoPush();
     navigate(currentView);
