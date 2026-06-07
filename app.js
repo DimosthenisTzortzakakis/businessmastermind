@@ -181,6 +181,56 @@ let qeExpPayMethod = 'Cash';
 let incBulkMode = false;
 let incSelectedIds = new Set();
 
+// ── Undo Stack ─────────────────────────────────────────────────
+// In-memory only (cleared on page reload). Captures snapshots before
+// bulk actions and individual entry saves so the user can reverse mistakes.
+const UNDO_MAX = 20;
+let undoStack = []; // [{income, expenses, description, ts}]
+let _undoToastTimer = null;
+
+function pushUndo(description) {
+  undoStack.push({
+    income:   JSON.parse(JSON.stringify(state.income   || [])),
+    expenses: JSON.parse(JSON.stringify(state.expenses || [])),
+    description,
+    ts: Date.now()
+  });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  showUndoToast(description);
+}
+
+function performUndo() {
+  if (!undoStack.length) { showToast('Nothing to undo', 'error'); return; }
+  const snap = undoStack.pop();
+  state.income   = snap.income;
+  state.expenses = snap.expenses;
+  saveData();
+  renderView(currentView);
+  showToast(`↩ Undone: ${snap.description}`);
+  // update or hide the undo toast
+  if (undoStack.length) showUndoToast(undoStack[undoStack.length-1].description);
+  else hideUndoToast();
+}
+
+function showUndoToast(description) {
+  clearTimeout(_undoToastTimer);
+  let bar = document.getElementById('undoFloatBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'undoFloatBar';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = `<span class="undo-label">↩ Undo: ${description}</span><button class="undo-btn" onclick="performUndo()">Undo</button><button class="undo-close" onclick="hideUndoToast()">✕</button>`;
+  bar.classList.add('visible');
+  _undoToastTimer = setTimeout(hideUndoToast, 30000); // auto-hide after 30s
+}
+
+function hideUndoToast() {
+  clearTimeout(_undoToastTimer);
+  const bar = document.getElementById('undoFloatBar');
+  if (bar) bar.classList.remove('visible');
+}
+
 // Form state
 let incomePaymentType = 'invoice';
 let incomeStatus      = 'Paid';
@@ -1254,6 +1304,7 @@ function saveIncome() {
     const idx = state.income.findIndex(e=>e.id===editingEntryId);
     if (idx>=0) {
       const prev = state.income[idx];
+      pushUndo(`Edit: ${(state.clients.find(c=>c.id===prev.clientId)||{}).name||'entry'}`);
       let paidDate = prev.paidDate;
       if (incomeStatus === 'Paid' && !paidDate) paidDate = Date.now();
       else if (incomeStatus !== 'Paid') paidDate = undefined;
@@ -1365,7 +1416,10 @@ function saveExpense() {
 
   if (editingEntryId) {
     const idx = state.expenses.findIndex(e=>e.id===editingEntryId);
-    if (idx>=0) state.expenses[idx] = { ...state.expenses[idx], category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate };
+    if (idx>=0) {
+      pushUndo(`Edit expense: ${state.expenses[idx].vendor||state.expenses[idx].category}`);
+      state.expenses[idx] = { ...state.expenses[idx], category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate };
+    }
     editingEntryId = null; editingEntryType = null;
     saveData();
     closeAllModals();
@@ -1514,6 +1568,7 @@ function doDelete() {
   if (pendingDeleteType === 'income') {
     // Clear QE grid draft data for this entry so it doesn't reappear
     const entry = state.income.find(e => e.id === pendingDeleteId);
+    pushUndo(`Delete: ${entry ? ((state.clients.find(c=>c.id===entry.clientId)||{}).name||'entry') : 'entry'}`);
     if (entry) {
       const cid = entry.clientId;
       const dt  = entry.date;
@@ -1525,6 +1580,8 @@ function doDelete() {
     state.income = state.income.filter(e => e.id !== pendingDeleteId);
     showToast('Income entry deleted');
   } else if (pendingDeleteType === 'expense') {
+    const expEntry = state.expenses.find(e => e.id === pendingDeleteId);
+    pushUndo(`Delete expense: ${expEntry ? (expEntry.vendor||expEntry.category) : 'entry'}`);
     state.expenses = state.expenses.filter(e => e.id !== pendingDeleteId);
     showToast('Expense entry deleted');
   }
@@ -2745,6 +2802,8 @@ function updateIncomeBulkBar() {
 }
 function bulkMarkIncome(status) {
   if (!incSelectedIds.size) { showToast('Select entries first','error'); return; }
+  const count = incSelectedIds.size;
+  pushUndo(`Mark ${count} entr${count===1?'y':'ies'} ${status}`);
   const now = Date.now();
   state.income.forEach(e => {
     if (incSelectedIds.has(e.id)) {
@@ -2754,15 +2813,17 @@ function bulkMarkIncome(status) {
     }
   });
   saveData();
-  showToast(`${incSelectedIds.size} entries marked ${status}`);
+  showToast(`${count} entries marked ${status}`);
   exitIncBulkMode();
 }
 function bulkDeleteIncome() {
   if (!incSelectedIds.size) { showToast('Select entries first','error'); return; }
   if (!confirm(`Delete ${incSelectedIds.size} selected entries?`)) return;
+  const count = incSelectedIds.size;
+  pushUndo(`Delete ${count} entr${count===1?'y':'ies'}`);
   state.income = state.income.filter(e => !incSelectedIds.has(e.id));
   saveData();
-  showToast(`${incSelectedIds.size} entries deleted`);
+  showToast(`${count} entries deleted`);
   exitIncBulkMode();
 }
 
@@ -3684,6 +3745,33 @@ function confirmCopyEntry() {
   renderView(currentView);
 }
 
+// ── One-time accident recovery ─────────────────────────────────
+// Reverts income entries whose paidDate was set today (the accident)
+// back to Pending. Entries already paid on a previous day are left alone.
+// Called manually if user accidentally bulk-marks a month as Paid.
+function revertTodayPaidToMonth(month) {
+  const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+  const todayTs = startOfToday.getTime();
+  let reverted = 0;
+  pushUndo(`Revert accidental Paid → Pending (${month||'all'})`);
+  state.income.forEach(e => {
+    if (e.status === 'Paid' && e.paidDate >= todayTs) {
+      if (!month || monthKey(e.date) === month) {
+        e.status = 'Pending';
+        delete e.paidDate;
+        reverted++;
+      }
+    }
+  });
+  if (reverted > 0) {
+    saveData();
+    renderView(currentView);
+    showToast(`↩ Reverted ${reverted} entries back to Pending`);
+  } else {
+    showToast('No entries were changed today to revert', 'error');
+  }
+}
+
 // ── Recurring Auto-Generate ────────────────────────────────────
 function generateRecurring(silent=false) {
   const currentMonth = todayVal().slice(0,7);
@@ -4221,6 +4309,17 @@ async function init() {
   document.addEventListener('click', e=>{
     if (!e.target.closest('.search-wrapper') && !e.target.closest('.search-results-panel')) {
       document.getElementById('searchResultsPanel').classList.add('hidden');
+    }
+  });
+
+  // Cmd/Ctrl+Z → undo
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+      const ae = document.activeElement;
+      // Don't intercept undo inside text inputs/textareas
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+      performUndo();
     }
   });
 
