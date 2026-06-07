@@ -1647,6 +1647,21 @@ function loadQEFromState(table) {
   const monthEntries = state.income.filter(e => e.date && e.date.startsWith(qeGridMonth));
   if (!monthEntries.length) return;
 
+  // Purge stale zero/empty sentinels in qeGridData for any cell that has a
+  // real saved value in state.income.  A sentinel of 0 or '' left over from a
+  // previous session would otherwise overwrite the saved value in Layer 2 and
+  // trick saveQEGrid into deleting the entry.
+  monthEntries.forEach(e => {
+    const cid = e.clientId; const ds = e.date; const sub = e.subClient||'';
+    const numericTypes = e.subClient ? ['subqty','subprice'] : ['qty','price'];
+    numericTypes.forEach(t => {
+      const key = t+'|'+cid+'|'+ds+'|'+sub;
+      if (key in qeGridData && (parseFloat(qeGridData[key])||0) <= 0) {
+        delete qeGridData[key];
+      }
+    });
+  });
+
   table.querySelectorAll('tbody tr[data-date]').forEach(tr => {
     const dateStr = tr.dataset.date;
     const dayEntries = monthEntries.filter(e => e.date === dateStr);
@@ -1728,8 +1743,10 @@ function restoreQEGridData() {
     if (key in qeGridData) {
       const sentinel = qeGridData[key];
       const isNumeric = ['qty','price','subqty','subprice'].includes(inp.dataset.type);
-      // Skip empty sentinel if Layer 1 already loaded a real value for this cell
-      if (isNumeric && sentinel === '' && inp.value !== '') return;
+      // Skip zero/empty sentinel if Layer 1 already loaded a real positive value.
+      // This prevents a stale "I cleared this cell" sentinel from wiping out a
+      // saved entry that the user didn't intend to delete.
+      if (isNumeric && (parseFloat(sentinel)||0) <= 0 && (parseFloat(inp.value)||0) > 0) return;
       inp.value = sentinel;
       if (inp.dataset.type === 'subnote') {
         const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
@@ -2282,17 +2299,18 @@ function saveQEGrid() {
         subqtys2.forEach(sq2 => {
           if ((parseFloat(sq2.value)||0) <= 0) {
             const sub2 = sq2.dataset.sub;
-            // Remove by client+date+sub — no service condition to avoid leaving orphans
+            // Only delete PENDING entries — never auto-delete Paid entries from QE
             state.income = state.income.filter(e =>
-              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||''))
+              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && e.status!=='Paid')
             );
           }
         });
       } else {
         const qi2 = tr.querySelector('[data-client="'+cid2+'"][data-type="qty"]');
         if ((parseFloat(qi2?.value)||0) <= 0 && (parseFloat(priceInp.value)||0) <= 0) {
+          // Only delete PENDING entries — never auto-delete Paid entries from QE
           state.income = state.income.filter(e =>
-            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')==='')
+            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')==='' && e.status!=='Paid')
           );
         }
       }
