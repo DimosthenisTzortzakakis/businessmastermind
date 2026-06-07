@@ -2800,6 +2800,26 @@ function updateIncomeBulkBar() {
   const cnt = document.getElementById('bulkSelCount');
   if (cnt) cnt.textContent = `${incSelectedIds.size} selected`;
 }
+function selectClientGroup(cid, e) {
+  if (e) e.stopPropagation();
+  const group = document.querySelector(`.byclient-group[data-cid="${cid}"]`);
+  if (!group) return;
+  const ids = [...group.querySelectorAll('[data-bulk-id]')].map(el => el.dataset.bulkId);
+  const allSelected = ids.every(id => incSelectedIds.has(id));
+  ids.forEach(id => allSelected ? incSelectedIds.delete(id) : incSelectedIds.add(id));
+  // Update row highlights and checkboxes
+  ids.forEach(id => {
+    const cb = group.querySelector(`.bulk-cb[data-id="${id}"]`);
+    if (cb) cb.checked = !allSelected;
+    const row = group.querySelector(`[data-bulk-id="${id}"]`);
+    if (row) row.classList.toggle('bulk-selected', !allSelected);
+  });
+  // Update the header checkbox state
+  const hdrCb = group.querySelector('.bc-select-all-cb');
+  if (hdrCb) { hdrCb.checked = !allSelected; hdrCb.indeterminate = false; }
+  updateBulkBar();
+}
+
 function bulkMarkIncome(status) {
   if (!incSelectedIds.size) { showToast('Select entries first','error'); return; }
   const count = incSelectedIds.size;
@@ -2906,8 +2926,12 @@ function renderIncome() {
             ${eaInc(e.id)}
           </div>`;
         }).join('');
+        const grpIds = grp.map(e=>e.id);
+        const allChecked = grpIds.every(id=>incSelectedIds.has(id));
+        const someChecked = !allChecked && grpIds.some(id=>incSelectedIds.has(id));
         html+=`<div class="byclient-group" data-cid="${cid}">
-          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}" onclick="toggleClientGroup('${cid}')">
+          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}" onclick="${incBulkMode?'':`toggleClientGroup('${cid}')`}">
+            ${incBulkMode?`<input type="checkbox" class="bulk-cb bc-select-all-cb" title="Select all for ${c?.name||'client'}" ${allChecked?'checked':''} onclick="selectClientGroup('${cid}',event)" style="width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)">`:'' }
             <div class="byclient-name">${av}<span>${c?.name||'Unknown'}</span></div>
             <div class="bc-meta">
               <span class="bc-count">${grp.length} payment${grp.length>1?'s':''}</span>
@@ -2918,12 +2942,25 @@ function renderIncome() {
               <span class="byclient-paid">${fmt(paid)}</span>
               ${pend>0?`<span class="byclient-pending">+${fmt(pend)} pend.</span>`:''}
             </div>
-            <i class="fa-solid fa-chevron-right bc-chevron"></i>
+            ${incBulkMode?'':`<i class="fa-solid fa-chevron-right bc-chevron"></i>`}
           </div>
           <div class="byclient-entries">${entriesHtml}</div>
         </div>`;
       });
-    cont.innerHTML = html; return;
+    cont.innerHTML = html;
+    // Set indeterminate on partially-selected client headers
+    if (incBulkMode) {
+      document.querySelectorAll('.byclient-group').forEach(grpEl => {
+        const ids = [...grpEl.querySelectorAll('[data-bulk-id]')].map(el=>el.dataset.bulkId);
+        const cb  = grpEl.querySelector('.bc-select-all-cb');
+        if (cb && ids.length) {
+          const n = ids.filter(id=>incSelectedIds.has(id)).length;
+          cb.checked       = n === ids.length;
+          cb.indeterminate = n > 0 && n < ids.length;
+        }
+      });
+    }
+    return;
   }
 
   // ── Excel view — Income ────────────────────────────────────────
@@ -3969,26 +4006,39 @@ async function autoPull(silent) {
     const cloudIncome   = p.income   || [];
     const cloudExpenses = p.expenses || [];
 
-    // Skip only if cloud is strictly older than local — we have newer data
-    if (cloudTs > 0 && cloudTs < localTs) {
-      setSyncIndicator('ok');
-      setTimeout(() => setSyncIndicator('idle'), 2000);
-      return;
-    }
+    // NEVER skip a pull entirely — the other device may have NEW entries
+    // even if its overall timestamp is older (e.g. phone added entries while
+    // desktop was also modified). Always merge by ID.
 
     // Snapshot IDs before merge so we can detect real changes
     const prevIncomeIds = new Set((state.income || []).map(e => e.id));
     const prevExpIds    = new Set((state.expenses || []).map(e => e.id));
 
-    // Merge: keep any local entries that cloud doesn't have (by id)
-    const cloudIncomeIds   = new Set(cloudIncome.map(e => e.id));
-    const cloudExpenseIds  = new Set(cloudExpenses.map(e => e.id));
+    // Build local maps for conflict resolution
+    const localIncMap = new Map((state.income   || []).map(e => [e.id, e]));
+    const localExpMap = new Map((state.expenses || []).map(e => [e.id, e]));
+
+    const cloudIncomeIds  = new Set(cloudIncome.map(e => e.id));
+    const cloudExpenseIds = new Set(cloudExpenses.map(e => e.id));
+
+    // For entries that exist on BOTH sides: prefer local if local is strictly
+    // newer (localTs > cloudTs), otherwise trust the cloud version.
+    const mergedIncome   = cloudIncome.map(ce => {
+      const le = localIncMap.get(ce.id);
+      return (le && localTs > cloudTs) ? le : ce;
+    });
+    const mergedExpenses = cloudExpenses.map(ce => {
+      const le = localExpMap.get(ce.id);
+      return (le && localTs > cloudTs) ? le : ce;
+    });
+
+    // Entries only in local (new additions not yet pushed to cloud)
     const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id));
     const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id));
 
     state.clients  = p.clients;
-    state.income   = [...cloudIncome,   ...localOnlyIncome];
-    state.expenses = [...cloudExpenses, ...localOnlyExpense];
+    state.income   = [...mergedIncome,   ...localOnlyIncome];
+    state.expenses = [...mergedExpenses, ...localOnlyExpense];
     state.services = p.services || [...DEFAULT_SERVICES];
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
@@ -4000,16 +4050,15 @@ async function autoPull(silent) {
     if (localOnlyIncome.length || localOnlyExpense.length) {
       scheduleAutoPush();
     }
-    // Only re-render if entry IDs actually changed — avoids constant flickering
-    // from 15-second autoPull when data hasn't moved
+    // Only re-render if entry IDs or statuses actually changed
     const incChanged = state.income.some(e => !prevIncomeIds.has(e.id)) ||
                        [...prevIncomeIds].some(id => !cloudIncomeIds.has(id) && !localOnlyIncome.find(e=>e.id===id));
     const expChanged = state.expenses.some(e => !prevExpIds.has(e.id)) ||
                        [...prevExpIds].some(id => !cloudExpenseIds.has(id) && !localOnlyExpense.find(e=>e.id===id));
-    // Also check if any entry statuses/amounts changed in cloud data
-    const statusChanged = cloudIncome.some(e => {
-      const local = (state.income||[]).find(x => x.id === e.id);
-      return local && (local.status !== e.status || local.amount !== e.amount);
+    // Also check if any entry statuses/amounts changed
+    const statusChanged = mergedIncome.some(e => {
+      const prev = localIncMap.get(e.id);
+      return prev && (prev.status !== e.status || prev.amount !== e.amount);
     });
     if (incChanged || expChanged || statusChanged || !silent) {
       navigate(currentView);
