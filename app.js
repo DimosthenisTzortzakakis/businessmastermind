@@ -1773,10 +1773,8 @@ function restoreQEGridData() {
   // Color per-client-per-day total cells
   document.querySelectorAll('.qe-client-total[data-client][data-date]').forEach(ct => {
     const cid = ct.dataset.client; const ds = ct.dataset.date;
-    const svc = getClientService(cid);
-    const entries = state.income.filter(e =>
-      e.clientId===cid && e.date===ds && (!svc||e.service===svc)
-    );
+    // No service filter — service can differ per subclient; match by clientId+date only
+    const entries = state.income.filter(e => e.clientId===cid && e.date===ds);
     if (!entries.length) return;
     const hasPending = entries.some(e=>e.status==='Pending');
     // If there is an unsaved draft value for this cell (any numeric qeGridData key
@@ -1972,29 +1970,19 @@ function renderQEIncome(cont) {
 
 // Returns the status of saved income entries for a given date in QE context
 function getQERowStatus(dateStr) {
-  // Aggregate across all selected clients, each using their own service
-  const entries = [];
-  qeGridSelectedClients.forEach(cid => {
-    const svc = getClientService(cid);
-    state.income.forEach(e => {
-      if (e.clientId === cid && e.date === dateStr && (!svc || e.service === svc))
-        entries.push(e);
-    });
-  });
+  // Aggregate across all selected clients — no service filter (service can vary per subclient)
+  const entries = state.income.filter(e =>
+    qeGridSelectedClients.includes(e.clientId) && e.date === dateStr
+  );
   if (!entries.length) return null;
   return entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
 }
 
 // Toggle all saved income entries for a date between Paid and Pending
 function toggleQERowStatus(dateStr) {
-  const entries = [];
-  qeGridSelectedClients.forEach(cid => {
-    const svc = getClientService(cid);
-    state.income.forEach(e => {
-      if (e.clientId === cid && e.date === dateStr && (!svc || e.service === svc))
-        entries.push(e);
-    });
-  });
+  const entries = state.income.filter(e =>
+    qeGridSelectedClients.includes(e.clientId) && e.date === dateStr
+  );
   if (!entries.length) return;
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
@@ -2007,10 +1995,8 @@ function toggleQERowStatus(dateStr) {
 
 // Toggle a single client's entries for one specific day
 function toggleQEClientDayStatus(cid, dateStr) {
-  const svc = getClientService(cid);
   const entries = state.income.filter(e =>
-    e.clientId === cid && e.date === dateStr &&
-    (!svc || e.service === svc)
+    e.clientId === cid && e.date === dateStr
   );
   if (!entries.length) return; // nothing saved yet
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
@@ -2031,12 +2017,10 @@ function toggleQEClientDayStatus(cid, dateStr) {
   showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
 }
 
-// Get combined status for all entries of a client in current QE month/service
+// Get combined status for all entries of a client in current QE month
 function getQEClientStatus(cid) {
-  const svc = getClientService(cid);
   const entries = state.income.filter(e =>
-    e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
-    (!svc || e.service === svc)
+    e.clientId === cid && e.date && e.date.startsWith(qeGridMonth)
   );
   if (!entries.length) return null;
   return entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
@@ -2044,10 +2028,8 @@ function getQEClientStatus(cid) {
 
 // Toggle ALL saved entries for a client (entire month) between Paid and Pending
 function toggleQEClientStatus(cid) {
-  const svc = getClientService(cid);
   const entries = state.income.filter(e =>
-    e.clientId === cid && e.date && e.date.startsWith(qeGridMonth) &&
-    (!svc || e.service === svc)
+    e.clientId === cid && e.date && e.date.startsWith(qeGridMonth)
   );
   if (!entries.length) { showToast('No saved entries for this client yet','error'); return; }
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
@@ -2064,21 +2046,16 @@ function toggleQEClientStatus(cid) {
   showToast(newStatus === 'Paid' ? '✓ All entries marked Paid' : '⏳ All entries marked Pending');
 }
 
-// Apply color to a .qe-td-total cell based on status
+// Apply color to a .qe-td-total (DAY TOTAL) cell.
+// Day total is always neutral — it's just a sum, not a status indicator.
+// Per-client totals have their own coloring via .qe-client-total.
 function applyQETotalColor(cell, status) {
-  if (status === 'Paid') {
-    cell.style.color = 'var(--green)';
-    cell.style.fontWeight = '700';
-    cell.title = 'Paid — tap to mark Pending';
-  } else if (status === 'Pending') {
-    cell.style.color = '#f59e0b';
-    cell.style.fontWeight = '700';
-    cell.title = 'Pending — tap to mark Paid';
-  } else {
-    cell.style.color = '';
-    cell.style.fontWeight = '';
-    cell.title = 'Tap to toggle status';
-  }
+  // Neutral regardless of status — the day total should not imply Paid/Pending
+  cell.style.color = 'var(--text-muted)';
+  cell.style.fontWeight = '600';
+  cell.title = status === 'Paid' ? 'All paid — tap to mark Pending'
+             : status === 'Pending' ? 'Has pending — tap to mark Paid'
+             : 'Tap to toggle status';
 }
 
 function updateQEClientTotal(inp) {
@@ -2111,10 +2088,8 @@ function updateQEClientTotal(inp) {
     // Color the client-total cell: orange the moment a value is typed,
     // green only if saved entries already show Paid
     if (clientTotal > 0) {
-      const svc = getClientService(cid);
-      const saved = state.income.filter(e =>
-        e.clientId===cid && e.date===dateStr && (!svc || e.service===svc)
-      );
+      // No service filter — match by clientId+date only so subclient entries are found
+      const saved = state.income.filter(e => e.clientId===cid && e.date===dateStr);
       const st = saved.length ? (saved.some(e=>e.status==='Pending') ? 'Pending' : 'Paid') : 'Pending';
       ct.style.color      = st === 'Paid' ? 'var(--green)' : '#f59e0b';
       ct.style.fontWeight = '700';
@@ -2129,10 +2104,7 @@ function updateQEClientTotal(inp) {
   const dt = tr.querySelector('.qe-td-total');
   if (dt) {
     dt.textContent = dayTotal > 0 ? fmt(dayTotal) : '—';
-    const rowStatus = getQERowStatus(dateStr);
-    // Orange the moment anything is typed; green only when all saved entries are Paid
-    const colorStatus = rowStatus !== null ? rowStatus : (dayTotal > 0 ? 'Pending' : null);
-    applyQETotalColor(dt, colorStatus);
+    applyQETotalColor(dt, getQERowStatus(dateStr));
   }
   updateQEColTotals();
 }
