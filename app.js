@@ -110,7 +110,7 @@ const DEFAULT_CLIENTS = [
 ];
 
 // ── State ──────────────────────────────────────────────────────
-let state = { clients:[], income:[], expenses:[], services:[] };
+let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[] };
 let currentView = 'dashboard';
 
 // Auto-sync
@@ -263,10 +263,11 @@ async function loadData() {
   try {
     const p = await idbGet(STORAGE_KEY);
     if (p) {
-      state.clients      = p.clients  || DEFAULT_CLIENTS;
-      state.income       = p.income   || [];
-      state.expenses     = p.expenses || [];
-      state.services     = p.services || [...DEFAULT_SERVICES];
+      state.clients      = p.clients    || DEFAULT_CLIENTS;
+      state.income       = p.income     || [];
+      state.expenses     = p.expenses   || [];
+      state.services     = p.services   || [...DEFAULT_SERVICES];
+      state.deletedIds   = p.deletedIds || [];
       state.lastModified = p.lastModified || 0;
     } else {
       state.clients  = DEFAULT_CLIENTS;
@@ -405,6 +406,13 @@ function loadUIState() {
 
 function saveData() {
   state.lastModified = Date.now();
+  // Prune tombstones older than 90 days to prevent unbounded growth.
+  // Any entry deleted >90 days ago can't still be on any device.
+  const cutoff90 = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  if (state.deletedIds && state.deletedIds.length > 200) {
+    // deletedIds are just IDs (no timestamps), so prune by count — keep last 500
+    state.deletedIds = state.deletedIds.slice(-500);
+  }
   idbSet(STORAGE_KEY, state); // fire-and-forget — IndexedDB has no size limit
   scheduleAutoPush();
 }
@@ -1340,7 +1348,7 @@ function saveIncome() {
       let paidDate = prev.paidDate;
       if (incomeStatus === 'Paid' && !paidDate) paidDate = Date.now();
       else if (incomeStatus !== 'Paid') paidDate = undefined;
-      const updated = { ...prev, clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice };
+      const updated = { ...prev, clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, updatedAt:Date.now() };
       if (paidDate) updated.paidDate = paidDate; else delete updated.paidDate;
       state.income[idx] = updated;
     }
@@ -1650,12 +1658,27 @@ function doDelete() {
         if (k.includes('|' + cid + '|' + dt + '|')) delete qeGridData[k];
       });
       idbSet(QE_GRID_KEY, qeGridData);
+      // Split payment: tombstone both halves
+      if (entry.splitGroupId) {
+        state.income.filter(e=>e.splitGroupId===entry.splitGroupId).forEach(e=>{
+          if (!state.deletedIds) state.deletedIds = [];
+          if (!state.deletedIds.includes(e.id)) state.deletedIds.push(e.id);
+        });
+        state.income = state.income.filter(e=>e.splitGroupId!==entry.splitGroupId);
+      } else {
+        if (!state.deletedIds) state.deletedIds = [];
+        if (!state.deletedIds.includes(pendingDeleteId)) state.deletedIds.push(pendingDeleteId);
+        state.income = state.income.filter(e => e.id !== pendingDeleteId);
+      }
+    } else {
+      state.income = state.income.filter(e => e.id !== pendingDeleteId);
     }
-    state.income = state.income.filter(e => e.id !== pendingDeleteId);
     showToast('Income entry deleted');
   } else if (pendingDeleteType === 'expense') {
     const expEntry = state.expenses.find(e => e.id === pendingDeleteId);
     pushUndo(`Delete expense: ${expEntry ? (expEntry.vendor||expEntry.category) : 'entry'}`);
+    if (!state.deletedIds) state.deletedIds = [];
+    if (!state.deletedIds.includes(pendingDeleteId)) state.deletedIds.push(pendingDeleteId);
     state.expenses = state.expenses.filter(e => e.id !== pendingDeleteId);
     showToast('Expense entry deleted');
   }
@@ -2061,7 +2084,8 @@ function toggleQERowStatus(dateStr) {
   if (!entries.length) return;
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
-  entries.forEach(e => { e.status = newStatus; });
+  const now = Date.now();
+  entries.forEach(e => { e.status = newStatus; e.updatedAt = now; });
   saveData();
   const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
   if (cell) applyQETotalColor(cell, newStatus);
@@ -2076,7 +2100,8 @@ function toggleQEClientDayStatus(cid, dateStr) {
   if (!entries.length) return; // nothing saved yet
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
-  entries.forEach(e => { e.status = newStatus; });
+  const nowD = Date.now();
+  entries.forEach(e => { e.status = newStatus; e.updatedAt = nowD; });
   saveData();
   // Update this client total cell color
   const ct = document.querySelector('.qe-client-total[data-client="'+cid+'"][data-date="'+dateStr+'"]');
@@ -2109,7 +2134,8 @@ function toggleQEClientStatus(cid) {
   if (!entries.length) { showToast('No saved entries for this client yet','error'); return; }
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
-  entries.forEach(e => { e.status = newStatus; });
+  const nowC = Date.now();
+  entries.forEach(e => { e.status = newStatus; e.updatedAt = nowC; });
   saveData();
   // Refresh all day-total colors for the affected dates
   const affectedDates = new Set(entries.map(e => e.date));
@@ -2300,12 +2326,12 @@ function saveQEGrid() {
           const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||''));
           const cPayType = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
           if (xi >= 0) {
-            state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, paymentType:cPayType };
+            state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, paymentType:cPayType, updatedAt:Date.now() };
             // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
           } else {
             const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice, sharedPrice:price,
               vatAmount:cPayType==='invoice'?amount*VAT_RATE:0,
-              paymentType:cPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
+              paymentType:cPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now() };
             state.income.push(entry); sheetsAdd('income',entry);
           }
           savedCount++; savedTotal += amount;
@@ -2322,12 +2348,12 @@ function saveQEGrid() {
         const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')==='');
         const cPayType2 = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
         if (xi >= 0) {
-          state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, paymentType:cPayType2 };
+          state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, paymentType:cPayType2, updatedAt:Date.now() };
           // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
         } else {
           const entry = { id:genId(), clientId:cid, subClient:'', service, amount, qty, unitPrice:price,
             vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0,
-            paymentType:cPayType2, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now() };
+            paymentType:cPayType2, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now() };
           state.income.push(entry); sheetsAdd('income',entry);
         }
         savedCount++; savedTotal += amount;
@@ -2893,6 +2919,7 @@ function bulkMarkIncome(status) {
   state.income.forEach(e => {
     if (incSelectedIds.has(e.id)) {
       e.status = status;
+      e.updatedAt = now;
       if (status === 'Paid') e.paidDate = now;
       else delete e.paidDate;
     }
@@ -3861,6 +3888,7 @@ function revertTodayPaidToMonth(month) {
       if (!month || monthKey(e.date) === month) {
         e.status = 'Pending';
         delete e.paidDate;
+        e.updatedAt = Date.now();
         reverted++;
       }
     }
@@ -4074,7 +4102,7 @@ async function autoPull(silent) {
 
     // NEVER skip a pull entirely — the other device may have NEW entries
     // even if its overall timestamp is older (e.g. phone added entries while
-    // desktop was also modified). Always merge by ID.
+    // desktop was also modified). Always merge by ID with per-entry timestamps.
 
     // Snapshot IDs before merge so we can detect real changes
     const prevIncomeIds = new Set((state.income || []).map(e => e.id));
@@ -4084,28 +4112,43 @@ async function autoPull(silent) {
     const localIncMap = new Map((state.income   || []).map(e => [e.id, e]));
     const localExpMap = new Map((state.expenses || []).map(e => [e.id, e]));
 
+    // Merge tombstones from both sides so deletions propagate everywhere
+    const allDeletedIds = new Set([...(state.deletedIds||[]), ...(p.deletedIds||[])]);
+
     const cloudIncomeIds  = new Set(cloudIncome.map(e => e.id));
     const cloudExpenseIds = new Set(cloudExpenses.map(e => e.id));
 
-    // For entries that exist on BOTH sides: prefer local if local is strictly
-    // newer (localTs > cloudTs), otherwise trust the cloud version.
-    const mergedIncome   = cloudIncome.map(ce => {
-      const le = localIncMap.get(ce.id);
-      return (le && localTs > cloudTs) ? le : ce;
-    });
-    const mergedExpenses = cloudExpenses.map(ce => {
-      const le = localExpMap.get(ce.id);
-      return (le && localTs > cloudTs) ? le : ce;
-    });
+    // For entries that exist on BOTH sides: use per-entry updatedAt for conflict
+    // resolution (whichever device modified it more recently wins).
+    // Entries deleted locally (in tombstone) are never re-added from cloud.
+    const mergedIncome = cloudIncome
+      .filter(ce => !allDeletedIds.has(ce.id))
+      .map(ce => {
+        const le = localIncMap.get(ce.id);
+        if (!le) return ce; // new on cloud, add it
+        const leTs = le.updatedAt || le.createdAt || 0;
+        const ceTs = ce.updatedAt || ce.createdAt || 0;
+        return leTs >= ceTs ? le : ce; // keep whichever was changed more recently
+      });
+    const mergedExpenses = cloudExpenses
+      .filter(ce => !allDeletedIds.has(ce.id))
+      .map(ce => {
+        const le = localExpMap.get(ce.id);
+        if (!le) return ce;
+        const leTs = le.updatedAt || le.createdAt || 0;
+        const ceTs = ce.updatedAt || ce.createdAt || 0;
+        return leTs >= ceTs ? le : ce;
+      });
 
-    // Entries only in local (new additions not yet pushed to cloud)
-    const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id));
-    const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id));
+    // Entries only in local (new additions not yet pushed to cloud), excluding tombstones
+    const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id)  && !allDeletedIds.has(e.id));
+    const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id) && !allDeletedIds.has(e.id));
 
-    state.clients  = p.clients;
-    state.income   = [...mergedIncome,   ...localOnlyIncome];
-    state.expenses = [...mergedExpenses, ...localOnlyExpense];
-    state.services = p.services || [...DEFAULT_SERVICES];
+    state.clients    = p.clients;
+    state.income     = [...mergedIncome,   ...localOnlyIncome];
+    state.expenses   = [...mergedExpenses, ...localOnlyExpense];
+    state.services   = p.services || [...DEFAULT_SERVICES];
+    state.deletedIds = [...allDeletedIds];
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
@@ -4274,14 +4317,19 @@ async function autoPullForced() {
     // ALWAYS merge — never blindly overwrite local data
     const cloudIncome   = p.income   || [];
     const cloudExpenses = p.expenses || [];
+    // Respect tombstones even on first-load forced pull
+    const allDeletedIdsF = new Set([...(state.deletedIds||[]), ...(p.deletedIds||[])]);
     const cloudIncomeIds  = new Set(cloudIncome.map(e => e.id));
     const cloudExpenseIds = new Set(cloudExpenses.map(e => e.id));
-    const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id));
-    const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id));
-    state.clients  = p.clients;
-    state.income   = [...cloudIncome,   ...localOnlyIncome];
-    state.expenses = [...cloudExpenses, ...localOnlyExpense];
-    state.services = p.services || [...DEFAULT_SERVICES];
+    const filteredCloudIncome   = cloudIncome.filter(e => !allDeletedIdsF.has(e.id));
+    const filteredCloudExpenses = cloudExpenses.filter(e => !allDeletedIdsF.has(e.id));
+    const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id)  && !allDeletedIdsF.has(e.id));
+    const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id) && !allDeletedIdsF.has(e.id));
+    state.clients    = p.clients;
+    state.income     = [...filteredCloudIncome,   ...localOnlyIncome];
+    state.expenses   = [...filteredCloudExpenses, ...localOnlyExpense];
+    state.services   = p.services || [...DEFAULT_SERVICES];
+    state.deletedIds = [...allDeletedIdsF];
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
     idbSet(STORAGE_KEY, state);
     // Remove any duplicate recurring entries from multi-device race
