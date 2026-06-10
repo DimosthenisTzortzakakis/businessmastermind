@@ -2528,6 +2528,9 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   border: 1px solid transparent;
   border-radius: 5px;
   color: var(--text);
+  -webkit-text-fill-color: var(--text); /* iOS Safari: number inputs ignore color */
+  -webkit-appearance: none;             /* iOS Safari: remove default input styling */
+  appearance: none;
   font-size: 12px;
   text-align: center;
   transition: border-color 0.15s, background 0.15s;
@@ -2535,7 +2538,7 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 .qe-sp-qty   { width: 48px; padding: 5px 4px; }
 .qe-sp-price { width: 60px; padding: 5px 4px; margin: 0 auto; display: block; }
-.qe-sp-subprice { width: 46px; padding: 2px 4px; margin-top: 2px; font-size: 10px; color: var(--amber); opacity: 0.7; }
+.qe-sp-subprice { width: 46px; padding: 2px 4px; margin-top: 2px; font-size: 10px; color: var(--amber); -webkit-text-fill-color: var(--amber); opacity: 0.7; }
 .qe-sp-subprice:focus { opacity: 1; }
 .qe-sp-subprice::placeholder { color: var(--amber); opacity: 0.6; font-size: 9px; }
 .qe-sp-note-inp { width: 80px; padding: 5px 4px; text-align: left; font-style: italic; color: var(--text-muted); }
@@ -2550,7 +2553,7 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .qe-note-pen:hover, .qe-note-pen.active { opacity: 1; color: var(--accent-hover); }
 .qe-sp-subnote { width: 64px; padding: 2px 4px; font-size: 10px; font-style: italic; color: var(--text-muted); margin-top: 1px; text-align: left; }
 .qe-sp-inp:focus { outline: none; border-color: var(--accent); background: rgba(99,102,241,0.12); }
-.qe-sp-inp:not(:placeholder-shown) { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.35); color: #a5b4fc; font-weight: 700; }
+.qe-sp-inp:not(:placeholder-shown) { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.35); color: #a5b4fc; -webkit-text-fill-color: #a5b4fc; font-weight: 700; }
 .qe-sp-sub {
   width: 90px; padding: 5px 4px;
   background: rgba(255,255,255,0.04);
