@@ -1995,6 +1995,7 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   color: var(--text);
 }
 .copy-dialog.open { opacity: 1; pointer-events: all; transform: translate(-50%, -50%) scale(1); }
+#printOptionsDialog { max-height: 90vh; overflow-y: auto; }
 .copy-dialog h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: var(--text); }
 .copy-dialog p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
 .copy-dialog-btns { display: flex; gap: 8px; margin-top: 16px; }

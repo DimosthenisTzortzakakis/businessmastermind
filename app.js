@@ -143,8 +143,10 @@ let reportPayFilter = 'all';
 let reportSubMode   = 'separated'; // 'combined' | 'separated'
 
 // Print options dialog
-let _printSubMode   = 'separated';
-let _printPayFilter = 'all';
+let _printSubMode    = 'separated';
+let _printPayFilter  = 'all';
+let _printMonths     = null;  // null = all months, array = specific months
+let _printSubClients = null;  // null = all subclients, array = specific ones
 
 // Quick entry tab
 let qeTab = 'income';
@@ -3574,48 +3576,134 @@ function printReport() {
 }
 
 function showPrintOptionsDialog(clientId, month) {
-  let dlg = document.getElementById('printOptionsDialog');
-  if (!dlg) {
-    dlg = document.createElement('div');
-    dlg.id = 'printOptionsDialog';
-    dlg.className = 'copy-dialog';
-    dlg.innerHTML = `
-      <h3><i class="fa-solid fa-print"></i> Print Options</h3>
-      <p id="printOptsMeta"></p>
+  // Always rebuild fresh — content is dynamic (months/subclients vary by client)
+  const old = document.getElementById('printOptionsDialog');
+  if (old) old.remove();
+
+  const isAll = clientId === '__all__';
+  const client = isAll ? null : clientById(clientId);
+  const clientEntries = isAll ? state.income : state.income.filter(e => e.clientId === clientId);
+
+  // Available months for this client (descending)
+  const availMonths = [...new Set(clientEntries.map(e => monthKey(e.date)))].sort().reverse();
+
+  // Available subclients (non-empty, sorted) — only for specific client
+  const availSubs = isAll ? [] :
+    [...new Set(clientEntries.map(e => e.subClient || '').filter(Boolean))].sort();
+
+  // Init print state
+  _printSubMode    = 'separated';
+  _printPayFilter  = reportPayFilter || 'all';
+  _printMonths     = month ? [month] : null; // pre-select current month if one was chosen
+  _printSubClients = null; // all subclients by default
+
+  // ── Month checkboxes ──────────────────────────────────────────
+  let monthsHtml = '';
+  if (availMonths.length > 1) {
+    const allChecked = !_printMonths;
+    monthsHtml = `
       <div style="margin-bottom:16px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Sub-client Layout</div>
-        <div style="display:flex;gap:8px" id="printSubModeToggle">
-          <button class="report-type-tab active" data-mode="separated" onclick="setPrintSubMode('separated')"><i class="fa-solid fa-list-ul"></i> Separated</button>
-          <button class="report-type-tab" data-mode="combined" onclick="setPrintSubMode('combined')"><i class="fa-solid fa-layer-group"></i> Combined</button>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Months</div>
+        <div style="display:flex;flex-direction:column;gap:5px;max-height:150px;overflow-y:auto;padding-right:4px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="printMonthAll" ${allChecked?'checked':''} onchange="togglePrintAllMonths(this)" style="accent-color:var(--accent);width:14px;height:14px" />
+            <span style="font-weight:600">All Months</span>
+          </label>
+          ${availMonths.map(m=>`
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;padding-left:4px">
+            <input type="checkbox" class="print-month-cb" value="${m}"
+              ${!_printMonths || _printMonths.includes(m)?'checked':''}
+              onchange="updatePrintMonthSel()"
+              style="accent-color:var(--accent);width:14px;height:14px" />
+            <span>${monthLabel(m)}</span>
+          </label>`).join('')}
         </div>
-      </div>
-      <div style="margin-bottom:20px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Payment Filter</div>
-        <div style="display:flex;gap:8px" id="printPayFilterToggle">
-          <button class="report-type-tab active" data-pf="all" onclick="setPrintPayFilter('all')">All</button>
-          <button class="report-type-tab invoice-tab" data-pf="invoice" onclick="setPrintPayFilter('invoice')"><i class="fa-solid fa-file-invoice"></i> Invoice</button>
-          <button class="report-type-tab cash-tab" data-pf="cash" onclick="setPrintPayFilter('cash')"><i class="fa-solid fa-money-bill"></i> Cash</button>
-        </div>
-      </div>
-      <div class="copy-dialog-btns">
-        <button class="btn-cancel" onclick="closePrintOptionsDialog()">Cancel</button>
-        <button class="btn-save" style="flex:1;padding:10px" onclick="confirmPrintReport()"><i class="fa-solid fa-print"></i> Print</button>
       </div>`;
-    document.body.appendChild(dlg);
-    document.getElementById('modalOverlay').addEventListener('click', closePrintOptionsDialog);
   }
+
+  // ── Subclient checkboxes ──────────────────────────────────────
+  let subsHtml = '';
+  if (availSubs.length > 0) {
+    subsHtml = `
+      <div style="margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Sub-Clients</div>
+        <div style="display:flex;flex-direction:column;gap:5px;max-height:150px;overflow-y:auto;padding-right:4px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="printSubClientAll" checked onchange="togglePrintAllSubClients(this)" style="accent-color:var(--accent);width:14px;height:14px" />
+            <span style="font-weight:600">All Sub-Clients</span>
+          </label>
+          ${availSubs.map(sc=>`
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;padding-left:4px">
+            <input type="checkbox" class="print-sc-cb" value="${sc}" checked
+              onchange="updatePrintSubClientSel()"
+              style="accent-color:var(--accent);width:14px;height:14px" />
+            <span>${sc}</span>
+          </label>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  const metaText = (isAll ? 'All Clients' : (client?.name||'')) + (month ? ' · '+monthLabel(month) : '');
+
+  const dlg = document.createElement('div');
+  dlg.id = 'printOptionsDialog';
+  dlg.className = 'copy-dialog';
   dlg.dataset.clientId = clientId;
-  dlg.dataset.month = month || '';
-  const client = clientById(clientId);
-  document.getElementById('printOptsMeta').textContent =
-    (clientId==='__all__' ? 'All Clients' : (client?.name||'')) +
-    (month ? ' · '+monthLabel(month) : '');
-  _printSubMode = 'separated';
-  _printPayFilter = reportPayFilter || 'all';
-  document.querySelectorAll('#printSubModeToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.mode===_printSubMode));
-  document.querySelectorAll('#printPayFilterToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.pf===_printPayFilter));
+  dlg.dataset.month    = month || '';
+  dlg.innerHTML = `
+    <h3><i class="fa-solid fa-print"></i> Print Options</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-muted)">${metaText}</p>
+    ${monthsHtml}
+    ${subsHtml}
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Sub-client Layout</div>
+      <div style="display:flex;gap:8px" id="printSubModeToggle">
+        <button class="report-type-tab active" data-mode="separated" onclick="setPrintSubMode('separated')"><i class="fa-solid fa-list-ul"></i> Separated</button>
+        <button class="report-type-tab" data-mode="combined" onclick="setPrintSubMode('combined')"><i class="fa-solid fa-layer-group"></i> Combined</button>
+      </div>
+    </div>
+    <div style="margin-bottom:20px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Payment Filter</div>
+      <div style="display:flex;gap:8px" id="printPayFilterToggle">
+        <button class="report-type-tab ${_printPayFilter==='all'?'active':''}" data-pf="all" onclick="setPrintPayFilter('all')">All</button>
+        <button class="report-type-tab invoice-tab ${_printPayFilter==='invoice'?'active':''}" data-pf="invoice" onclick="setPrintPayFilter('invoice')"><i class="fa-solid fa-file-invoice"></i> Invoice</button>
+        <button class="report-type-tab cash-tab ${_printPayFilter==='cash'?'active':''}" data-pf="cash" onclick="setPrintPayFilter('cash')"><i class="fa-solid fa-money-bill"></i> Cash</button>
+      </div>
+    </div>
+    <div class="copy-dialog-btns">
+      <button class="btn-cancel" onclick="closePrintOptionsDialog()">Cancel</button>
+      <button class="btn-save" style="flex:1;padding:10px" onclick="confirmPrintReport()"><i class="fa-solid fa-print"></i> Print</button>
+    </div>`;
+  document.body.appendChild(dlg);
+  document.getElementById('modalOverlay').addEventListener('click', closePrintOptionsDialog);
   document.getElementById('modalOverlay').classList.remove('hidden');
   requestAnimationFrame(()=>requestAnimationFrame(()=>dlg.classList.add('open')));
+}
+
+function togglePrintAllMonths(cb) {
+  document.querySelectorAll('.print-month-cb').forEach(c => c.checked = cb.checked);
+  _printMonths = cb.checked ? null : [];
+}
+
+function updatePrintMonthSel() {
+  const all  = document.querySelectorAll('.print-month-cb');
+  const sel  = [...document.querySelectorAll('.print-month-cb:checked')].map(c => c.value);
+  _printMonths = sel.length === all.length ? null : sel;
+  const allCb = document.getElementById('printMonthAll');
+  if (allCb) allCb.checked = sel.length === all.length;
+}
+
+function togglePrintAllSubClients(cb) {
+  document.querySelectorAll('.print-sc-cb').forEach(c => c.checked = cb.checked);
+  _printSubClients = cb.checked ? null : [];
+}
+
+function updatePrintSubClientSel() {
+  const all = document.querySelectorAll('.print-sc-cb');
+  const sel = [...document.querySelectorAll('.print-sc-cb:checked')].map(c => c.value);
+  _printSubClients = sel.length === all.length ? null : sel;
+  const allCb = document.getElementById('printSubClientAll');
+  if (allCb) allCb.checked = sel.length === all.length;
 }
 
 function setPrintSubMode(m) {
@@ -3637,15 +3725,19 @@ function closePrintOptionsDialog() {
 function confirmPrintReport() {
   const dlg = document.getElementById('printOptionsDialog');
   if (!dlg) return;
+  if (_printMonths !== null && _printMonths.length === 0) { showToast('Select at least one month', 'error'); return; }
+  if (_printSubClients !== null && _printSubClients.length === 0) { showToast('Select at least one sub-client', 'error'); return; }
   const clientId = dlg.dataset.clientId;
-  const month    = dlg.dataset.month || '';
   closePrintOptionsDialog();
-  executePrintReport(clientId, month, _printSubMode, _printPayFilter);
+  executePrintReport(clientId, _printMonths, _printSubMode, _printPayFilter, _printSubClients);
 }
 
-function executePrintReport(clientId, month, subMode, payFilter) {
+function executePrintReport(clientId, months, subMode, payFilter, subClients) {
   let entries = clientId==='__all__' ? [...state.income] : state.income.filter(e=>e.clientId===clientId);
-  if (month) entries = entries.filter(e=>monthKey(e.date)===month);
+  // months: null = all, array = specific months
+  if (months && months.length) entries = entries.filter(e => months.includes(monthKey(e.date)));
+  // subClients: null = all, array = specific subclients (only for single client)
+  if (subClients && clientId !== '__all__') entries = entries.filter(e => subClients.includes(e.subClient || ''));
   if (payFilter!=='all') entries = entries.filter(e=>e.paymentType===payFilter);
   if (!entries.length) { showToast('No entries to print','error'); return; }
   entries.sort((a,b)=>a.date.localeCompare(b.date));
@@ -3654,7 +3746,10 @@ function executePrintReport(clientId, month, subMode, payFilter) {
   const client = isAll ? null : clientById(clientId);
   const title = isAll ? 'All Income' : (client?.name||'Report');
   const filterLabel = payFilter==='cash' ? ' — Cash Only' : payFilter==='invoice' ? ' — Invoice / VAT' : '';
-  const monthStr = month ? ' · '+monthLabel(month) : '';
+  // Build a readable month string for the PDF header
+  const monthStr = !months ? '' :
+    months.length === 1 ? ' · '+monthLabel(months[0]) :
+    ' · '+monthLabel(months[months.length-1])+' – '+monthLabel(months[0]);
   const showVAT = payFilter!=='cash';
   const fd = d => { const [y,mo,dy]=d.split('-'); return `${dy}/${mo}/${y}`; };
   const ef = n => '€'+(Math.round(n*100)/100).toFixed(2);
@@ -3775,7 +3870,10 @@ function executePrintReport(clientId, month, subMode, payFilter) {
     </svg>`;
   })();
   const exportedDate = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});
-  const reportMonth  = month ? monthLabel(month) : '';
+  const reportMonth = !months ? 'All Months' :
+    months.length === 1 ? monthLabel(months[0]) :
+    months.map(m=>monthLabel(m)).join(', ');
+  const subClientLabel = subClients ? ' · '+subClients.join(', ') : '';
 
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
     <title>${title} — ${reportMonth}</title>
@@ -3794,7 +3892,7 @@ function executePrintReport(clientId, month, subMode, payFilter) {
       ${avatarHtml}
       <div class="rpt-info">
         <div class="rpt-client-name">${title}${filterLabel}</div>
-        <div class="rpt-meta">${[reportMonth, 'Exported '+exportedDate].filter(Boolean).join(' · ')}</div>
+        <div class="rpt-meta">${[reportMonth+subClientLabel, 'Exported '+exportedDate].filter(Boolean).join(' · ')}</div>
       </div>
     </div>
     ${bodyHtml}
