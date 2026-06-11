@@ -2738,6 +2738,20 @@ function setDashMonth(m) { dashMonth=m; saveUIState(); renderDashboard(); }
 
 // ── Statistics ─────────────────────────────────────────────────
 function renderStatistics(filteredInc) {
+  // Update period badge
+  const badge = document.getElementById('statsPeriodBadge');
+  if (badge) {
+    if (dashMonth === 'all') {
+      badge.textContent = 'All Time';
+      badge.className = 'stats-period-badge period-all';
+    } else {
+      const cur = todayVal().slice(0,7);
+      const yr  = dashMonth.slice(0,4);
+      const curYr = cur.slice(0,4);
+      badge.textContent = dashMonth === cur ? 'This Month · ' + monthLabel(dashMonth) : monthLabel(dashMonth);
+      badge.className = 'stats-period-badge period-month';
+    }
+  }
   if (chartByClient) { chartByClient.destroy(); chartByClient=null; }
   if (chartMonthly)  { chartMonthly.destroy();  chartMonthly=null;  }
   if (chartExpCat)   { chartExpCat.destroy();   chartExpCat=null;   }
@@ -2761,7 +2775,7 @@ function renderStatistics(filteredInc) {
         labels: cEntries.map(([n])=>n),
         datasets:[{ data:cEntries.map(([,v])=>v),
           backgroundColor: cEntries.map(([n])=>state.clients.find(c=>c.name===n)?.color||'#666'),
-          borderWidth:2, borderColor:'#13132a' }]
+          borderWidth:2, borderColor:'rgba(255,255,255,0.08)' }]
       },
       options:{ responsive:true, maintainAspectRatio:false,
         plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8',font:{size:11,family:'Inter'},padding:8,boxWidth:12 } },
@@ -2810,7 +2824,7 @@ function renderStatistics(filteredInc) {
         labels: catEntries.map(([n])=>n),
         datasets:[{ data: catEntries.map(([,v])=>v),
           backgroundColor: catEntries.map((_,i)=>catColors[i%catColors.length]),
-          borderWidth:2, borderColor:'#13132a' }]
+          borderWidth:2, borderColor:'rgba(255,255,255,0.08)' }]
       },
       options:{ responsive:true, maintainAspectRatio:false,
         plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8',font:{size:11,family:'Inter'},padding:8,boxWidth:12 } },
@@ -2832,9 +2846,10 @@ function renderStatistics(filteredInc) {
   const maxCl = topClients[0]?.[1]||1;
   const maxSv = topSvc[0]?.[1]||1;
   const maxMo = topMo[0]?.[1]||1;
+  const periodLabel = dashMonth === 'all' ? 'All Time' : monthLabel(dashMonth);
   document.getElementById('statsTablesRow').innerHTML = `
     <div class="stats-table-card">
-      <div class="stats-table-title"><i class="fa-solid fa-trophy"></i> Top Clients</div>
+      <div class="stats-table-title"><i class="fa-solid fa-trophy"></i> Top Clients <span class="stats-period-sub">${periodLabel}</span></div>
       ${topClients.length?topClients.map(([n,v],i)=>{
         const c=state.clients.find(cl=>cl.name===n);
         const pct=Math.round((v/maxCl)*100);
@@ -2842,14 +2857,14 @@ function renderStatistics(filteredInc) {
       }).join(''):'<div class="chart-empty">No data</div>'}
     </div>
     <div class="stats-table-card">
-      <div class="stats-table-title"><i class="fa-solid fa-star"></i> Top Services</div>
+      <div class="stats-table-title"><i class="fa-solid fa-star"></i> Top Services <span class="stats-period-sub">${periodLabel}</span></div>
       ${topSvc.length?topSvc.map(([n,v],i)=>{
         const pct=Math.round((v/maxSv)*100);
         return`<div class="stats-row"><span class="stats-rank">${i+1}</span><span class="stats-name">${n}</span><div class="stats-bar-wrap"><div class="stats-bar" style="width:${pct}%;background:var(--accent)"></div></div><span class="stats-val">${fmt(v)}</span></div>`;
       }).join(''):'<div class="chart-empty">No data</div>'}
     </div>
     <div class="stats-table-card">
-      <div class="stats-table-title"><i class="fa-solid fa-calendar-star"></i> Best Months</div>
+      <div class="stats-table-title"><i class="fa-solid fa-calendar-star"></i> Best Months <span class="stats-period-sub">All Time</span></div>
       ${topMo.length?topMo.map(([m,v],i)=>{
         const pct=Math.round((v/maxMo)*100);
         return`<div class="stats-row"><span class="stats-rank">${i+1}</span><span class="stats-name">${monthLabel(m)}</span><div class="stats-bar-wrap"><div class="stats-bar" style="width:${pct}%;background:var(--blue)"></div></div><span class="stats-val">${fmt(v)}</span></div>`;
