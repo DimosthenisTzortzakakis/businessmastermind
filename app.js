@@ -2758,6 +2758,17 @@ function renderStatistics(filteredInc) {
 
   if (typeof Chart === 'undefined') return;
 
+  // Re-create a canvas if a previous render replaced it with an empty-state
+  // message, otherwise the chart can never come back when data appears
+  const ensureCanvas = (wrapId, canvasId) => {
+    let cv = document.getElementById(canvasId);
+    if (!cv) {
+      const wrap = document.getElementById(wrapId);
+      if (wrap) { wrap.innerHTML = `<canvas id="${canvasId}"></canvas>`; cv = document.getElementById(canvasId); }
+    }
+    return cv;
+  };
+
   // Revenue by client doughnut
   const byClient = {};
   (filteredInc||state.income).filter(e=>e.status==='Paid').forEach(e=>{
@@ -2767,7 +2778,7 @@ function renderStatistics(filteredInc) {
   });
   const cEntries = Object.entries(byClient).sort((a,b)=>b[1]-a[1]);
 
-  const pieCtx = document.getElementById('chartByClient');
+  const pieCtx = ensureCanvas('chartByClientWrap', 'chartByClient');
   if (pieCtx && cEntries.length) {
     chartByClient = new Chart(pieCtx, {
       type:'doughnut',
@@ -2787,7 +2798,7 @@ function renderStatistics(filteredInc) {
 
   // Monthly bar chart
   const months = allMonths().slice(0,12).reverse();
-  const barCtx = document.getElementById('chartMonthly');
+  const barCtx = ensureCanvas('chartMonthlyWrap', 'chartMonthly');
   if (barCtx && months.length) {
     chartMonthly = new Chart(barCtx, {
       type:'bar',
@@ -2811,11 +2822,17 @@ function renderStatistics(filteredInc) {
     barCtx.parentElement.innerHTML='<div class="chart-empty">No monthly data yet</div>';
   }
 
-  // Expenses by category doughnut
+  // Expenses by category doughnut — respects the dashboard month filter
+  const periodSubLabel = dashMonth === 'all' ? 'All Time' : monthLabel(dashMonth);
+  const cbcp = document.getElementById('chartByClientPeriod');
+  const cecp = document.getElementById('chartExpCatPeriod');
+  if (cbcp) cbcp.textContent = periodSubLabel;
+  if (cecp) cecp.textContent = periodSubLabel;
+  const statExpenses = dashMonth === 'all' ? state.expenses : state.expenses.filter(e => monthKey(e.date) === dashMonth);
   const byCatExp = {};
-  state.expenses.forEach(e => { byCatExp[e.category] = (byCatExp[e.category]||0) + e.amount; });
+  statExpenses.forEach(e => { byCatExp[e.category] = (byCatExp[e.category]||0) + e.amount; });
   const catEntries = Object.entries(byCatExp).sort((a,b) => b[1]-a[1]);
-  const expCatCtx = document.getElementById('chartExpCat');
+  const expCatCtx = ensureCanvas('chartExpCatWrap', 'chartExpCat');
   const catColors = ['#ef4444','#f97316','#f59e0b','#84cc16','#10b981','#06b6d4','#6366f1','#8b5cf6','#ec4899','#64748b'];
   if (expCatCtx && catEntries.length) {
     chartExpCat = new Chart(expCatCtx, {
@@ -4796,30 +4813,51 @@ async function checkAuth() {
   return false;
 }
 
+async function finishFirebaseLogin(user) {
+  const idToken = await user.getIdToken();
+  authToken   = idToken;
+  authRefresh = user.refreshToken;
+  authEmail   = user.email || '';
+  authUid     = user.uid;
+  authExpiry  = Date.now() + 3600 * 1000;
+  localStorage.setItem(AUTH_KEY,     authToken);
+  localStorage.setItem(AUTH_REFRESH, authRefresh);
+  localStorage.setItem(AUTH_EMAIL,   authEmail);
+  localStorage.setItem(AUTH_UID,     authUid);
+  localStorage.setItem(AUTH_EXPIRY,  String(authExpiry));
+  hideLoginScreen();
+  scheduleTokenRefresh();
+  onAuthReady();
+}
+
+// On mobile the Google popup gets blocked / stuck on a blank page (iOS Safari
+// third-party storage rules), so we use the full-page redirect flow there.
+async function handleGoogleRedirect() {
+  if (!sessionStorage.getItem('bm_google_redirect')) return false;
+  sessionStorage.removeItem('bm_google_redirect');
+  try {
+    const result = await firebase.auth().getRedirectResult();
+    if (result && result.user) { await finishFirebaseLogin(result.user); return true; }
+  } catch(e) {
+    showLoginScreen();
+    setLoginError(e.message || 'Google sign-in failed');
+  }
+  return false;
+}
+
 async function doGoogleLogin() {
   const btn = document.getElementById('loginGoogleBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    const result   = await firebase.auth().signInWithPopup(provider);
-    const user     = result.user;
-    const idToken  = await user.getIdToken();
-
-    authToken   = idToken;
-    authRefresh = user.refreshToken;
-    authEmail   = user.email  || '';
-    authUid     = user.uid;
-    authExpiry  = Date.now() + 3600 * 1000;
-
-    localStorage.setItem(AUTH_KEY,    authToken);
-    localStorage.setItem(AUTH_REFRESH, authRefresh);
-    localStorage.setItem(AUTH_EMAIL,  authEmail);
-    localStorage.setItem(AUTH_UID,    authUid);
-    localStorage.setItem(AUTH_EXPIRY, String(authExpiry));
-
-    hideLoginScreen();
-    scheduleTokenRefresh();
-    onAuthReady();
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      sessionStorage.setItem('bm_google_redirect', '1');
+      await firebase.auth().signInWithRedirect(provider);
+      return; // page navigates away; handleGoogleRedirect() finishes on return
+    }
+    const result = await firebase.auth().signInWithPopup(provider);
+    await finishFirebaseLogin(result.user);
   } catch(e) {
     setLoginError(e.message || 'Google sign-in failed');
     if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> Continue with Google'; }
@@ -4827,6 +4865,7 @@ async function doGoogleLogin() {
 }
 
 function doSignOut() {
+  try { if (typeof firebase !== 'undefined') firebase.auth().signOut(); } catch(_) {}
   authToken = ''; authRefresh = ''; authEmail = ''; authUid = ''; authExpiry = 0;
   localStorage.removeItem(AUTH_KEY);
   localStorage.removeItem(AUTH_REFRESH);
@@ -4904,6 +4943,8 @@ function scheduleTokenRefresh() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Returning from a mobile Google sign-in redirect?
+  if (await handleGoogleRedirect()) return;
   // Check auth first if API key is configured
   const authed = await checkAuth();
   if (!authed) {
