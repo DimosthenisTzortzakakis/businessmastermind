@@ -4056,14 +4056,29 @@ function generateRecurring(silent=false) {
 // ── Cloud Sync — Firebase Realtime Database ────────────────────
 // Works directly from browser, no proxy needed, completely free.
 const BLOB_KEY     = 'bm_sync_blob_id';
-const FB_URL_KEY   = 'bm_firebase_url';
-let syncBlobId  = localStorage.getItem(BLOB_KEY)   || '';
-let fbUrl       = localStorage.getItem(FB_URL_KEY) || '';
+const FB_URL_KEY    = 'bm_firebase_url';
+const FB_APIKEY_KEY = 'bm_firebase_apikey';
+const AUTH_KEY      = 'bm_auth_token';
+const AUTH_REFRESH  = 'bm_auth_refresh';
+const AUTH_EMAIL    = 'bm_auth_email';
+const AUTH_UID      = 'bm_auth_uid';
+const AUTH_EXPIRY   = 'bm_auth_expiry';
+
+let syncBlobId   = localStorage.getItem(BLOB_KEY)      || '';
+let fbUrl        = localStorage.getItem(FB_URL_KEY)     || '';
+let fbApiKey     = localStorage.getItem(FB_APIKEY_KEY)  || '';
+let authToken    = localStorage.getItem(AUTH_KEY)       || '';
+let authRefresh  = localStorage.getItem(AUTH_REFRESH)   || '';
+let authEmail    = localStorage.getItem(AUTH_EMAIL)     || '';
+let authUid      = localStorage.getItem(AUTH_UID)       || '';
+let authExpiry   = parseInt(localStorage.getItem(AUTH_EXPIRY)||'0', 10);
 let _autoPushTimer = null;
 let _isSyncing  = false;
+let _loginMode  = 'signin'; // 'signin' | 'signup'
 
 function fbEndpoint(id) {
-  return fbUrl.replace(/\/+$/, '') + '/bmsync/' + id + '.json';
+  const base = fbUrl.replace(/\/+$/, '') + '/bmsync/' + id + '.json';
+  return authToken ? base + '?auth=' + authToken : base;
 }
 
 // Encode Firebase URL + sync ID into one portable string
@@ -4630,10 +4645,203 @@ async function init() {
   setTimeout(() => renderView(currentView), 300);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+// ── Firebase Authentication ─────────────────────────────────────
+function showLoginScreen() {
+  const ls = document.getElementById('loginScreen');
+  if (ls) ls.classList.remove('hidden');
+  // Pre-fill config if already set
+  const u = document.getElementById('loginFbUrl');
+  const k = document.getElementById('loginApiKey');
+  if (u && fbUrl) u.value = fbUrl;
+  if (k && fbApiKey) k.value = fbApiKey;
+}
+
+function hideLoginScreen() {
+  const ls = document.getElementById('loginScreen');
+  if (ls) ls.classList.add('hidden');
+}
+
+function setLoginError(msg) {
+  const el = document.getElementById('loginError');
+  if (!el) return;
+  if (msg) { el.textContent = msg; el.classList.remove('hidden'); }
+  else { el.classList.add('hidden'); }
+}
+
+function toggleLoginMode() {
+  _loginMode = _loginMode === 'signin' ? 'signup' : 'signin';
+  const btn  = document.getElementById('loginBtn');
+  const txt  = document.getElementById('loginToggleText');
+  const tog  = document.getElementById('loginToggleBtn');
+  if (_loginMode === 'signup') {
+    if (btn)  btn.innerHTML  = '<i class="fa-solid fa-user-plus"></i> Create Account';
+    if (txt)  txt.textContent = 'Already have an account?';
+    if (tog)  tog.textContent = 'Sign In';
+  } else {
+    if (btn)  btn.innerHTML  = '<i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In';
+    if (txt)  txt.textContent = "Don't have an account?";
+    if (tog)  tog.textContent = 'Sign Up';
+  }
+  setLoginError('');
+}
+
+function saveLoginConfig() {
+  const u = (document.getElementById('loginFbUrl')?.value || '').trim();
+  const k = (document.getElementById('loginApiKey')?.value || '').trim();
+  if (u) { fbUrl = u; localStorage.setItem(FB_URL_KEY, u); }
+  if (k) { fbApiKey = k; localStorage.setItem(FB_APIKEY_KEY, k); }
+  showToast('Config saved');
+}
+
+async function doLogin() {
+  const email = (document.getElementById('loginEmail')?.value || '').trim();
+  const pass  = document.getElementById('loginPassword')?.value || '';
+  if (!email || !pass) { setLoginError('Enter your email and password.'); return; }
+  if (!fbApiKey) { setLoginError('Set your Firebase API Key in ⚙ Firebase Setup first.'); return; }
+
+  const btn = document.getElementById('loginBtn');
+  if (btn) btn.disabled = true;
+  setLoginError('');
+
+  const endpoint = _loginMode === 'signup'
+    ? `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${fbApiKey}`
+    : `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbApiKey}`;
+
+  try {
+    const res  = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass, returnSecureToken: true })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data?.error?.message || 'Authentication failed';
+      const friendly = msg === 'EMAIL_NOT_FOUND' ? 'No account found for that email.'
+        : msg === 'INVALID_PASSWORD' ? 'Incorrect password.'
+        : msg === 'INVALID_LOGIN_CREDENTIALS' ? 'Incorrect email or password.'
+        : msg === 'EMAIL_EXISTS' ? 'An account with this email already exists.'
+        : msg === 'WEAK_PASSWORD : Password should be at least 6 characters' ? 'Password must be at least 6 characters.'
+        : msg;
+      setLoginError(friendly);
+      if (btn) btn.disabled = false;
+      return;
+    }
+    // Store tokens
+    authToken   = data.idToken;
+    authRefresh = data.refreshToken;
+    authEmail   = data.email;
+    authUid     = data.localId;
+    authExpiry  = Date.now() + (parseInt(data.expiresIn, 10) * 1000);
+    localStorage.setItem(AUTH_KEY,     authToken);
+    localStorage.setItem(AUTH_REFRESH, authRefresh);
+    localStorage.setItem(AUTH_EMAIL,   authEmail);
+    localStorage.setItem(AUTH_UID,     authUid);
+    localStorage.setItem(AUTH_EXPIRY,  String(authExpiry));
+    // Use UID as syncBlobId if none set
+    if (!syncBlobId) {
+      syncBlobId = authUid;
+      localStorage.setItem(BLOB_KEY, syncBlobId);
+    }
+    hideLoginScreen();
+    onAuthReady();
+  } catch (e) {
+    setLoginError('Network error — check your connection.');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function refreshAuthToken() {
+  if (!authRefresh || !fbApiKey) return false;
+  try {
+    const res  = await fetch(`https://securetoken.googleapis.com/v1/token?key=${fbApiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(authRefresh)}`
+    });
+    const data = await res.json();
+    if (!res.ok) return false;
+    authToken  = data.id_token;
+    authRefresh = data.refresh_token;
+    authExpiry  = Date.now() + (parseInt(data.expires_in, 10) * 1000);
+    localStorage.setItem(AUTH_KEY,     authToken);
+    localStorage.setItem(AUTH_REFRESH, authRefresh);
+    localStorage.setItem(AUTH_EXPIRY,  String(authExpiry));
+    return true;
+  } catch { return false; }
+}
+
+async function checkAuth() {
+  // No API key configured = open mode (no auth required)
+  if (!fbApiKey) return true;
+  // Token present and not expired → OK
+  if (authToken && authExpiry > Date.now() + 60000) return true;
+  // Try refresh
+  if (authRefresh) {
+    const ok = await refreshAuthToken();
+    if (ok) return true;
+  }
+  return false;
+}
+
+function doSignOut() {
+  authToken = ''; authRefresh = ''; authEmail = ''; authUid = ''; authExpiry = 0;
+  localStorage.removeItem(AUTH_KEY);
+  localStorage.removeItem(AUTH_REFRESH);
+  localStorage.removeItem(AUTH_EMAIL);
+  localStorage.removeItem(AUTH_UID);
+  localStorage.removeItem(AUTH_EXPIRY);
+  updateSidebarUser();
+  showLoginScreen();
+}
+
+function updateSidebarUser() {
+  const el    = document.getElementById('sidebarUser');
+  const av    = document.getElementById('sidebarUserAvatar');
+  const email = document.getElementById('sidebarUserEmail');
+  if (!el) return;
+  if (authEmail) {
+    el.classList.remove('hidden');
+    if (email) email.textContent = authEmail;
+    if (av)    av.textContent   = authEmail.charAt(0).toUpperCase();
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+function onAuthReady() {
+  updateSidebarUser();
   init().catch(err => {
     console.error('App init failed:', err);
-    // Recover: render dashboard with whatever state loaded so far
+    try { navigate('dashboard'); } catch(_) {}
+  });
+}
+
+// Schedule token refresh 5 min before expiry
+function scheduleTokenRefresh() {
+  if (!fbApiKey || !authRefresh || !authExpiry) return;
+  const delay = Math.max(60000, authExpiry - Date.now() - 300000);
+  setTimeout(async () => {
+    await refreshAuthToken();
+    scheduleTokenRefresh();
+  }, delay);
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Check auth first if API key is configured
+  const authed = await checkAuth();
+  if (!authed) {
+    showLoginScreen();
+    return;
+  }
+  // Use UID as syncBlobId if none set and we have a UID
+  if (!syncBlobId && authUid) {
+    syncBlobId = authUid;
+    localStorage.setItem(BLOB_KEY, syncBlobId);
+  }
+  updateSidebarUser();
+  scheduleTokenRefresh();
+  init().catch(err => {
+    console.error('App init failed:', err);
     try { navigate('dashboard'); } catch(_) {}
   });
 });

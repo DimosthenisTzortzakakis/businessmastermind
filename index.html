@@ -16,6 +16,47 @@
 </head>
 <body>
 
+  <!-- Liquid Glass Background -->
+  <div class="glass-bg">
+    <div class="glass-blob blob-1"></div>
+    <div class="glass-blob blob-2"></div>
+    <div class="glass-blob blob-3"></div>
+    <div class="glass-blob blob-4"></div>
+  </div>
+
+  <!-- Login Screen -->
+  <div id="loginScreen" class="login-screen hidden">
+    <div class="login-glass">
+      <div class="login-logo">
+        <img src="logo.png" alt="Scrollwise" style="width:52px;height:52px;border-radius:50%;object-fit:cover;" />
+      </div>
+      <div class="login-title">Mastermind</div>
+      <div class="login-sub">Business Tracker</div>
+      <div id="loginError" class="login-error hidden"></div>
+      <div class="login-form">
+        <input type="email" id="loginEmail" class="login-input" placeholder="Email address" autocomplete="email" />
+        <input type="password" id="loginPassword" class="login-input" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" />
+        <button class="login-btn" onclick="doLogin()" id="loginBtn">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In
+        </button>
+      </div>
+      <div class="login-footer">
+        <span id="loginToggleText">Don't have an account?</span>
+        <button class="login-link" onclick="toggleLoginMode()" id="loginToggleBtn">Sign Up</button>
+      </div>
+      <div class="login-setup" id="loginSetup">
+        <details>
+          <summary style="cursor:pointer;font-size:12px;color:var(--text-faint);margin-top:16px">⚙ Firebase Setup</summary>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+            <input type="text" id="loginFbUrl" class="login-input" placeholder="Firebase DB URL (https://…firebaseio.com)" style="font-size:12px;padding:10px 14px" />
+            <input type="text" id="loginApiKey" class="login-input" placeholder="Firebase API Key" style="font-size:12px;padding:10px 14px" />
+            <button class="login-btn" style="background:rgba(255,255,255,0.12);font-size:13px;padding:10px" onclick="saveLoginConfig()">Save Config</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
   <!-- Mobile sidebar overlay -->
   <div class="sidebar-overlay" onclick="closeMobileSidebar()"></div>
 
@@ -40,6 +81,11 @@
       <a class="nav-item" data-view="reports" onclick="navigate('reports')"><i class="fa-solid fa-chart-bar"></i><span>Reports</span></a>
     </nav>
     <div class="sidebar-footer">
+      <div class="sidebar-user hidden" id="sidebarUser">
+        <div class="sidebar-user-avatar" id="sidebarUserAvatar">?</div>
+        <span class="sidebar-user-email" id="sidebarUserEmail"></span>
+        <button class="sidebar-signout" onclick="doSignOut()" title="Sign out"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
       <button class="btn-sidebar-action" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate Recurring</button>
       <button class="btn-sidebar-action btn-cloud-sync" onclick="openSyncModal()"><i class="fa-solid fa-cloud"></i> Cloud Sync <span class="cloud-sync-dot cs-idle" id="cloudSyncDot"></span></button>
       <button class="btn-sidebar-action" onclick="exportData()"><i class="fa-solid fa-download"></i> Export JSON</button>
