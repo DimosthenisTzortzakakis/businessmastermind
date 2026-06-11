@@ -4080,8 +4080,11 @@ const AUTH_UID      = 'bm_auth_uid';
 const AUTH_EXPIRY   = 'bm_auth_expiry';
 
 let syncBlobId   = localStorage.getItem(BLOB_KEY)      || '';
-let fbUrl        = localStorage.getItem(FB_URL_KEY)     || '';
-let fbApiKey     = localStorage.getItem(FB_APIKEY_KEY)  || '';
+const FB_URL_DEFAULT    = 'https://business-mastermind-scrollwise-default-rtdb.europe-west1.firebasedatabase.app/';
+const FB_APIKEY_DEFAULT = 'AIzaSyAhj1jDLB1qZ5_M9vadJRNkujBaPVpH0qM';
+
+let fbUrl        = localStorage.getItem(FB_URL_KEY)     || FB_URL_DEFAULT;
+let fbApiKey     = localStorage.getItem(FB_APIKEY_KEY)  || FB_APIKEY_DEFAULT;
 let authToken    = localStorage.getItem(AUTH_KEY)       || '';
 let authRefresh  = localStorage.getItem(AUTH_REFRESH)   || '';
 let authEmail    = localStorage.getItem(AUTH_EMAIL)     || '';
