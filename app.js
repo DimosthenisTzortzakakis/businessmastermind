@@ -514,7 +514,11 @@ function sheetsDelete(type, id) {
 
 // ── Helpers ────────────────────────────────────────────────────
 function genId() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
-function fmt(n)  { return '€'+Number(n||0).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmt(n)  {
+  const v = Number(n||0);
+  const s = '€'+Math.abs(v).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});
+  return v < 0 ? '-'+s : s;
+}
 function toDateStr(s) {
   if (!s) return '';
   // Strip time portion if ISO datetime (e.g. "2026-05-10T21:00:00.000Z" → "2026-05-10")
@@ -2628,6 +2632,31 @@ function flashRow(tr, type) {
   setTimeout(()=>tr.classList.remove('qe-flash-'+type), 600);
 }
 
+// Count-up animation when a KPI value changes (e.g. switching month filter).
+// Skipped entirely when the user prefers reduced motion.
+let _lastKpis = null;
+function animateKpiValues(next) {
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const prev = _lastKpis;
+  _lastKpis = next;
+  if (reduced || !prev) return;
+  const DURATION = 400;
+  Object.keys(next).forEach(key => {
+    const from = prev[key], to = next[key];
+    if (from === to || from === undefined) return;
+    const el = document.querySelector(`.kpi-value[data-kpi="${key}"]`);
+    if (!el) return;
+    const start = performance.now();
+    const tick = now => {
+      const p = Math.min(1, (now - start) / DURATION);
+      const eased = 1 - Math.pow(1 - p, 4); // ease-out-quart
+      el.textContent = fmt(from + (to - from) * eased);
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
 // ── RENDER: Dashboard ──────────────────────────────────────────
 function renderDashboard() {
   renderMonthPills();
@@ -2640,10 +2669,11 @@ function renderDashboard() {
   const totalExp  = exp.reduce((s,e)=>s+e.amount,0);
   const netProfit = collected-totalExp;
   document.getElementById('kpiGrid').innerHTML = `
-    <div class="kpi-card green kpi-clickable" onclick="goToIncome('Paid')" title="Go to Income · Paid"><div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div><div class="kpi-label">Collected</div><div class="kpi-value">${fmt(collected)}</div></div>
-    <div class="kpi-card amber kpi-clickable" onclick="goToIncome('Pending')" title="Go to Income · Pending"><div class="kpi-icon"><i class="fa-solid fa-clock"></i></div><div class="kpi-label">Pending</div><div class="kpi-value">${fmt(pending)}</div></div>
-    <div class="kpi-card red kpi-clickable" onclick="navigate('expenses')" title="Go to Expenses"><div class="kpi-icon"><i class="fa-solid fa-arrow-trend-down"></i></div><div class="kpi-label">Expenses</div><div class="kpi-value">${fmt(totalExp)}</div></div>
-    <div class="kpi-card blue"><div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div><div class="kpi-label">Net Profit</div><div class="kpi-value" style="color:${netProfit>=0?'var(--green)':'var(--red)'}">${fmt(netProfit)}</div></div>`;
+    <div class="kpi-card green kpi-clickable" onclick="goToIncome('Paid')" title="Go to Income · Paid"><div class="kpi-icon"><i class="fa-solid fa-circle-check"></i></div><div class="kpi-label">Collected</div><div class="kpi-value" data-kpi="collected">${fmt(collected)}</div></div>
+    <div class="kpi-card amber kpi-clickable" onclick="goToIncome('Pending')" title="Go to Income · Pending"><div class="kpi-icon"><i class="fa-solid fa-clock"></i></div><div class="kpi-label">Pending</div><div class="kpi-value" data-kpi="pending">${fmt(pending)}</div></div>
+    <div class="kpi-card red kpi-clickable" onclick="navigate('expenses')" title="Go to Expenses"><div class="kpi-icon"><i class="fa-solid fa-arrow-trend-down"></i></div><div class="kpi-label">Expenses</div><div class="kpi-value" data-kpi="expenses">${fmt(totalExp)}</div></div>
+    <div class="kpi-card blue"><div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div><div class="kpi-label">Net Profit</div><div class="kpi-value" data-kpi="profit" style="color:${netProfit>=0?'var(--green)':'var(--red)'}">${fmt(netProfit)}</div></div>`;
+  animateKpiValues({ collected, pending, expenses: totalExp, profit: netProfit });
 
   // Recurring prompt — count missing recurring entries for current month
   const curMonth = todayVal().slice(0,7);
@@ -2779,7 +2809,19 @@ function renderStatistics(filteredInc) {
   const cEntries = Object.entries(byClient).sort((a,b)=>b[1]-a[1]);
 
   const pieCtx = ensureCanvas('chartByClientWrap', 'chartByClient');
-  if (pieCtx && cEntries.length) {
+  if (pieCtx && cEntries.length === 1) {
+    // A one-client doughnut is a full ring with zero information — show the
+    // figure directly instead
+    const [name, val] = cEntries[0];
+    const color = state.clients.find(c=>c.name===name)?.color || 'var(--accent)';
+    pieCtx.parentElement.innerHTML = `
+      <div class="chart-single">
+        <div class="chart-single-dot" style="background:${color}"></div>
+        <div class="chart-single-name">${name}</div>
+        <div class="chart-single-val">${fmt(val)}</div>
+        <div class="chart-single-sub">100% of revenue this period</div>
+      </div>`;
+  } else if (pieCtx && cEntries.length) {
     chartByClient = new Chart(pieCtx, {
       type:'doughnut',
       data:{
@@ -4633,6 +4675,21 @@ async function init() {
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
       e.preventDefault();
       performUndo();
+    }
+  });
+
+  // Power-user shortcuts: N = new entry, / = search, Esc = close sheet
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && activeSheet) { closeAllModals(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+    if (activeSheet) return;
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openAddPicker(); }
+    else if (e.key === '/') {
+      e.preventDefault();
+      const s = document.getElementById('globalSearch');
+      if (s) s.focus();
     }
   });
 

@@ -37,7 +37,7 @@ input[type="number"] { -moz-appearance: textfield; }
   --border: rgba(255,255,255,0.13);
   --text: #f1f5f9;
   --text-muted: #94a3b8;
-  --text-faint: #475569;
+  --text-faint: #6b7d96; /* ≥4.5:1 on --bg for the 9-11px micro-labels */
   --radius: 16px;
   --radius-sm: 10px;
   --radius-xs: 6px;
@@ -1506,11 +1506,10 @@ a { text-decoration: none; color: inherit; }
    ============================================================ */
 .stats-charts-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 20px;
   margin-bottom: 24px;
 }
-@media (max-width: 900px) { .stats-charts-row { grid-template-columns: 1fr; } }
 .chart-card {
   background: var(--bg-card);
   backdrop-filter: blur(14px) saturate(160%);
@@ -1532,6 +1531,16 @@ a { text-decoration: none; color: inherit; }
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); font-size: 13px;
 }
+/* Low-data state: a single client owns 100% — show the figure, not a full ring */
+.chart-single {
+  height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px;
+}
+.chart-single-dot  { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 16px 2px currentColor; }
+.chart-single-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.chart-single-val  { font-size: 28px; font-weight: 800; color: var(--text); letter-spacing: -0.5px; }
+.chart-single-sub  { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
 .stats-tables-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2987,7 +2996,12 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   padding: 24px;
   background: #040410;
 }
+@keyframes loginEnter {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
 .login-glass {
+  animation: loginEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1);
   background: rgba(10,10,28,0.82);
   backdrop-filter: blur(48px) saturate(200%);
   -webkit-backdrop-filter: blur(48px) saturate(200%);
@@ -3049,6 +3063,11 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   background: rgba(99,102,241,0.1);
   box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
   -webkit-text-fill-color: var(--text);
+}
+.login-input::placeholder { color: var(--text-muted); opacity: 1; }
+.login-btn:focus-visible, .login-google-btn:focus-visible, .login-link:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 2px;
 }
 .login-btn {
   width: 100%;
@@ -3190,4 +3209,13 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   text-transform: uppercase;
   letter-spacing: 0.4px;
   opacity: 0.8;
+}
+
+/* ── Reduced motion ─────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

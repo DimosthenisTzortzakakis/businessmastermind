@@ -4,8 +4,8 @@
     {
       "name": "BusinessMastermind",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "-p", "5500", "."],
-      "port": 5500
+      "runtimeArgs": ["serve", "-p", "5510", "."],
+      "port": 5510
     }
   ]
 }
