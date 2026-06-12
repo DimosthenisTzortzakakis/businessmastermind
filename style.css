@@ -95,6 +95,11 @@ body {
   background: radial-gradient(circle at center, rgba(14,130,220,0.32) 0%, transparent 65%);
   bottom: 15%; left: -100px;
 }
+/* On phones the blobs cover the whole viewport and wash out the glass
+   surfaces — dim them so text keeps its contrast */
+@media (max-width: 768px) {
+  .glass-blob { opacity: 0.45; }
+}
 button { cursor: pointer; border: none; background: none; font-family: inherit; }
 input, select, textarea { font-family: inherit; }
 a { text-decoration: none; color: inherit; }

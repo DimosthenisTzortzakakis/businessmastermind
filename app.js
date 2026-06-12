@@ -4218,6 +4218,26 @@ function saveFbUrl() {
 
 let _pendingPush = false; // true if unsaved changes haven't reached Firebase yet
 
+// Fetch wrapper for Firebase: on 401/403 (expired token) refresh the auth
+// token and retry once. If it still fails, force re-login so sync never
+// silently dies in the background.
+let _authPromptShown = false;
+async function fbFetch(id, opts) {
+  let res = await fetch(fbEndpoint(id), opts);
+  if ((res.status === 401 || res.status === 403) && fbApiKey) {
+    const ok = await refreshAuthToken();
+    if (ok) res = await fetch(fbEndpoint(id), opts);
+    if (!ok || res.status === 401 || res.status === 403) {
+      if (!_authPromptShown) {
+        _authPromptShown = true;
+        showToast('Session expired — please sign in again', 'error');
+        doSignOut();
+      }
+    }
+  }
+  return res;
+}
+
 function scheduleAutoPush() {
   if (!syncBlobId || !fbUrl) return;
   _pendingPush = true;
@@ -4237,7 +4257,7 @@ async function autoPush(silent, keepalive = false) {
   setSyncIndicator('pushing');
   try {
     const body = JSON.stringify(state);
-    const res = await fetch(fbEndpoint(syncBlobId), {
+    const res = await fbFetch(syncBlobId, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body,
@@ -4281,7 +4301,7 @@ async function autoPull(silent) {
   _isSyncing = true;
   setSyncIndicator('pulling');
   try {
-    const res = await fetch(fbEndpoint(syncBlobId));
+    const res = await fbFetch(syncBlobId);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
@@ -4318,7 +4338,7 @@ async function autoPull(silent) {
         if (!le) return ce; // new on cloud, add it
         const leTs = le.updatedAt || le.createdAt || 0;
         const ceTs = ce.updatedAt || ce.createdAt || 0;
-        return leTs >= ceTs ? le : ce; // keep whichever was changed more recently
+        return leTs > ceTs ? le : ce; // newer wins; on a tie prefer cloud so stale untimestamped local copies converge
       });
     const mergedExpenses = cloudExpenses
       .filter(ce => !allDeletedIds.has(ce.id))
@@ -4327,7 +4347,7 @@ async function autoPull(silent) {
         if (!le) return ce;
         const leTs = le.updatedAt || le.createdAt || 0;
         const ceTs = ce.updatedAt || ce.createdAt || 0;
-        return leTs >= ceTs ? le : ce;
+        return leTs > ceTs ? le : ce;
       });
 
     // Entries only in local (new additions not yet pushed to cloud), excluding tombstones
@@ -4398,7 +4418,7 @@ async function cloudPull() {
   const btn = document.getElementById('cloudPullBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pulling…'; }
   try {
-    const res = await fetch(fbEndpoint(syncBlobId));
+    const res = await fbFetch(syncBlobId);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
@@ -4483,7 +4503,8 @@ function startAutoSync() {
   if (!syncBlobId) return;
   // Pull when window regains focus
   window.addEventListener('focus', () => autoPull(true));
-  // Poll every 30 seconds
+  // iOS Safari restores from bfcache without firing focus — pull on pageshow too
+  window.addEventListener('pageshow', e => { if (e.persisted) autoPull(true); });
   setInterval(() => autoPull(true), 15000); // check every 15s
   // On initial load: if local state is empty (new device / first visit),
   // do a forced pull that always re-renders after completion
@@ -4500,7 +4521,7 @@ async function autoPullForced() {
   _isSyncing = true;
   setSyncIndicator('pulling');
   try {
-    const res = await fetch(fbEndpoint(syncBlobId));
+    const res = await fbFetch(syncBlobId);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const p = await res.json();
     if (!p || !p.clients || !Array.isArray(p.clients)) throw new Error('Invalid data');
