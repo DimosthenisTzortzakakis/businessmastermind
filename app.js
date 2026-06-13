@@ -110,7 +110,7 @@ const DEFAULT_CLIENTS = [
 ];
 
 // ── State ──────────────────────────────────────────────────────
-let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[] };
+let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{} };
 let currentView = 'dashboard';
 
 // Auto-sync
@@ -206,6 +206,11 @@ function performUndo() {
   const snap = undoStack.pop();
   state.income   = snap.income;
   state.expenses = snap.expenses;
+  // Clear tombstones for any entry the undo brings back, otherwise the next
+  // sync would treat the restored entry as deleted and remove it again.
+  const restoredIds = new Set([...snap.income, ...snap.expenses].map(e => e.id));
+  if (state.deletedIds) state.deletedIds = state.deletedIds.filter(id => !restoredIds.has(id));
+  if (state.deletedAt) restoredIds.forEach(id => delete state.deletedAt[id]);
   saveData();
   renderView(currentView);
   showToast(`↩ Undone: ${snap.description}`);
@@ -406,14 +411,36 @@ function loadUIState() {
   } catch(e) {}
 }
 
+// Record a deletion so it propagates to every device and the entry can never
+// be resurrected by a stale copy on another device. Tombstones are timestamped
+// and kept for a full year — far longer than any realistic offline period.
+function addTombstone(id) {
+  if (!id) return;
+  if (!state.deletedIds) state.deletedIds = [];
+  if (!state.deletedAt)  state.deletedAt  = {};
+  if (!state.deletedIds.includes(id)) state.deletedIds.push(id);
+  state.deletedAt[id] = Date.now();
+}
+
+const TOMBSTONE_TTL = 365 * 24 * 60 * 60 * 1000; // 1 year
+
 function saveData() {
   state.lastModified = Date.now();
-  // Prune tombstones older than 90 days to prevent unbounded growth.
-  // Any entry deleted >90 days ago can't still be on any device.
-  const cutoff90 = Date.now() - 90 * 24 * 60 * 60 * 1000;
-  if (state.deletedIds && state.deletedIds.length > 200) {
-    // deletedIds are just IDs (no timestamps), so prune by count — keep last 500
-    state.deletedIds = state.deletedIds.slice(-500);
+  // Prune tombstones only when they are older than a full year. Pruning by
+  // count (the old behaviour) could drop a recent deletion that an offline
+  // device still needed, which is exactly how deleted entries came back.
+  if (state.deletedIds && state.deletedIds.length) {
+    if (!state.deletedAt) state.deletedAt = {};
+    const cutoff = Date.now() - TOMBSTONE_TTL;
+    state.deletedIds = state.deletedIds.filter(id => {
+      const ts = state.deletedAt[id];
+      if (ts === undefined) return true;     // legacy tombstone, no ts — keep
+      return ts >= cutoff;                   // keep if deleted within the year
+    });
+    // Drop timestamp records for ids no longer tracked
+    Object.keys(state.deletedAt).forEach(id => {
+      if (!state.deletedIds.includes(id)) delete state.deletedAt[id];
+    });
   }
   idbSet(STORAGE_KEY, state); // fire-and-forget — IndexedDB has no size limit
   scheduleAutoPush();
@@ -1666,14 +1693,10 @@ function doDelete() {
       idbSet(QE_GRID_KEY, qeGridData);
       // Split payment: tombstone both halves
       if (entry.splitGroupId) {
-        state.income.filter(e=>e.splitGroupId===entry.splitGroupId).forEach(e=>{
-          if (!state.deletedIds) state.deletedIds = [];
-          if (!state.deletedIds.includes(e.id)) state.deletedIds.push(e.id);
-        });
+        state.income.filter(e=>e.splitGroupId===entry.splitGroupId).forEach(e=>addTombstone(e.id));
         state.income = state.income.filter(e=>e.splitGroupId!==entry.splitGroupId);
       } else {
-        if (!state.deletedIds) state.deletedIds = [];
-        if (!state.deletedIds.includes(pendingDeleteId)) state.deletedIds.push(pendingDeleteId);
+        addTombstone(pendingDeleteId);
         state.income = state.income.filter(e => e.id !== pendingDeleteId);
       }
     } else {
@@ -1683,8 +1706,7 @@ function doDelete() {
   } else if (pendingDeleteType === 'expense') {
     const expEntry = state.expenses.find(e => e.id === pendingDeleteId);
     pushUndo(`Delete expense: ${expEntry ? (expEntry.vendor||expEntry.category) : 'entry'}`);
-    if (!state.deletedIds) state.deletedIds = [];
-    if (!state.deletedIds.includes(pendingDeleteId)) state.deletedIds.push(pendingDeleteId);
+    addTombstone(pendingDeleteId);
     state.expenses = state.expenses.filter(e => e.id !== pendingDeleteId);
     showToast('Expense entry deleted');
   }
@@ -3009,6 +3031,7 @@ function bulkDeleteIncome() {
   if (!confirm(`Delete ${incSelectedIds.size} selected entries?`)) return;
   const count = incSelectedIds.size;
   pushUndo(`Delete ${count} entr${count===1?'y':'ies'}`);
+  incSelectedIds.forEach(id => addTombstone(id));
   state.income = state.income.filter(e => !incSelectedIds.has(e.id));
   saveData();
   showToast(`${count} entries deleted`);
@@ -4326,6 +4349,8 @@ async function autoPull(silent) {
 
     // Merge tombstones from both sides so deletions propagate everywhere
     const allDeletedIds = new Set([...(state.deletedIds||[]), ...(p.deletedIds||[])]);
+    // Merge tombstone timestamps too so the 1-year prune window stays accurate
+    const mergedDeletedAt = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
 
     const cloudIncomeIds  = new Set(cloudIncome.map(e => e.id));
     const cloudExpenseIds = new Set(cloudExpenses.map(e => e.id));
@@ -4361,6 +4386,7 @@ async function autoPull(silent) {
     state.expenses   = [...mergedExpenses, ...localOnlyExpense];
     state.services   = p.services || [...DEFAULT_SERVICES];
     state.deletedIds = [...allDeletedIds];
+    state.deletedAt  = mergedDeletedAt;
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
@@ -4543,6 +4569,7 @@ async function autoPullForced() {
     state.expenses   = [...filteredCloudExpenses, ...localOnlyExpense];
     state.services   = p.services || [...DEFAULT_SERVICES];
     state.deletedIds = [...allDeletedIdsF];
+    state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
     idbSet(STORAGE_KEY, state);
     // Remove any duplicate recurring entries from multi-device race
@@ -4979,7 +5006,7 @@ async function adoptUserBlob() {
   // previous user — wipe it instead of seeding it into the new account's blob
   const lastUid = localStorage.getItem(LAST_UID_KEY) || '';
   if (lastUid && lastUid !== authUid) {
-    state = { clients:[], income:[], expenses:[], services:[], deletedIds:[] };
+    state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{} };
     await idbSet(STORAGE_KEY, state);
     try { navigate(currentView); } catch(_) {}
   }
