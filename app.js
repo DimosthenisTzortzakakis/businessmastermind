@@ -110,7 +110,7 @@ const DEFAULT_CLIENTS = [
 ];
 
 // ── State ──────────────────────────────────────────────────────
-let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{} };
+let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{} };
 let currentView = 'dashboard';
 
 // Auto-sync
@@ -275,6 +275,8 @@ async function loadData() {
       state.expenses     = p.expenses   || [];
       state.services     = p.services   || [...DEFAULT_SERVICES];
       state.deletedIds   = p.deletedIds || [];
+      state.deletedAt    = p.deletedAt || {};
+      state.monthlyStopped = p.monthlyStopped || {};
       state.lastModified = p.lastModified || 0;
     } else {
       state.clients  = DEFAULT_CLIENTS;
@@ -715,7 +717,7 @@ function navigate(view) {
   document.querySelectorAll('.bottom-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.view').forEach(el=>el.classList.add('hidden'));
   document.getElementById('view-'+view).classList.remove('hidden');
-  const titles={dashboard:'Dashboard',income:'Income',expenses:'Expenses',clients:'Clients',quickentry:'Quick Entry',reports:'Reports',services:'Services'};
+  const titles={dashboard:'Dashboard',income:'Income',expenses:'Expenses',clients:'Clients',quickentry:'Quick Entry',reports:'Reports',services:'Services',monthly:'Monthly'};
   document.getElementById('topbarTitle').textContent = titles[view]||'';
   renderView(view);
 }
@@ -728,6 +730,7 @@ function renderView(v) {
   else if (v==='quickentry')renderQuickEntry();
   else if (v==='reports')   renderReports();
   else if (v==='services')  renderServices();
+  else if (v==='monthly')   renderMonthly();
 }
 
 // ── Client Management ──────────────────────────────────────────
@@ -1383,6 +1386,9 @@ function saveIncome() {
       else if (incomeStatus !== 'Paid') paidDate = undefined;
       const updated = { ...prev, clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, updatedAt:Date.now() };
       if (paidDate) updated.paidDate = paidDate; else delete updated.paidDate;
+      // Editing a single month of a monthly series is a per-month override —
+      // mark it so it doesn't become the template for future auto-generation
+      if (incRecurring && prev.recurring && (prev.amount !== amount)) updated.oneOff = true;
       state.income[idx] = updated;
     }
     editingEntryId = null; editingEntryType = null;
@@ -1393,6 +1399,8 @@ function saveIncome() {
   } else {
     const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
     if (incomeStatus === 'Paid') entry.paidDate = Date.now();
+    // Manually adding a monthly entry revives a previously stopped series
+    if (incRecurring && state.monthlyStopped) delete state.monthlyStopped[incSeriesKey(entry)];
     try {
       state.income.push(entry);
       saveData();
@@ -1492,7 +1500,9 @@ function saveExpense() {
     const idx = state.expenses.findIndex(e=>e.id===editingEntryId);
     if (idx>=0) {
       pushUndo(`Edit expense: ${state.expenses[idx].vendor||state.expenses[idx].category}`);
-      state.expenses[idx] = { ...state.expenses[idx], category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate };
+      const prevExp = state.expenses[idx];
+      state.expenses[idx] = { ...prevExp, category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, updatedAt:Date.now() };
+      if (expRecurring && prevExp.recurring && (prevExp.amount !== amount)) state.expenses[idx].oneOff = true;
     }
     editingEntryId = null; editingEntryType = null;
     saveData();
@@ -1502,6 +1512,7 @@ function saveExpense() {
     return;
   } else {
     const entry = { id:genId(), category, vendor, description, amount, vatAmount, paymentMethod:expPaymentMethod, recurring:expRecurring, date:rawDate, createdAt:Date.now() };
+    if (expRecurring && state.monthlyStopped) delete state.monthlyStopped[expSeriesKey(entry)];
     try {
       state.expenses.push(entry);
       saveData();
@@ -4100,43 +4111,58 @@ function revertTodayPaidToMonth(month) {
 }
 
 // ── Recurring Auto-Generate ────────────────────────────────────
+// ── Monthly (recurring) series helpers ─────────────────────────
+// A "series" is the recurring template identified by who+what. Each calendar
+// month is a separate entry instance sharing the same series key.
+function incSeriesKey(e) { return 'inc\x00' + e.clientId + '\x00' + e.service + '\x00' + (e.subClient||''); }
+function expSeriesKey(e) { return 'exp\x00' + e.category + '\x00' + e.vendor; }
+function seriesKeyOf(kind, e) { return kind==='income' ? incSeriesKey(e) : expSeriesKey(e); }
+// A series is "stopped" from month M onward when the user deleted "this + future".
+function seriesStoppedFrom(key) { return (state.monthlyStopped && state.monthlyStopped[key]) || null; }
+function isSeriesStoppedForMonth(key, month) {
+  const from = seriesStoppedFrom(key);
+  return from !== null && month >= from;
+}
+
 function generateRecurring(silent=false) {
   const currentMonth = todayVal().slice(0,7);
   let generated = 0;
 
-  // Income: key = clientId + service + subClient (subClient needed for agency multi-subclient)
+  // Income: template = latest recurring instance that is NOT a one-off override
   const incTemplates = new Map();
-  state.income.filter(e=>e.recurring).forEach(e=>{
-    const k = e.clientId + '\x00' + e.service + '\x00' + (e.subClient||'');
+  state.income.filter(e=>e.recurring && !e.oneOff).forEach(e=>{
+    const k = incSeriesKey(e);
     if (!incTemplates.has(k) || e.date > incTemplates.get(k).date) incTemplates.set(k, e);
   });
   incTemplates.forEach((tmpl, k)=>{
-    const [clientId, service, subClient] = k.split('\x00');
+    if (isSeriesStoppedForMonth(k, currentMonth)) return; // series stopped — don't regenerate
+    const [, clientId, service, subClient] = k.split('\x00');
     const exists = state.income.some(e=>
       e.recurring && e.clientId===clientId && e.service===service &&
       (e.subClient||'')===(subClient||'') && monthKey(e.date)===currentMonth
     );
     if (!exists) {
-      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', status:'Pending', subClient:subClient||'', createdAt:Date.now() };
+      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', status:'Pending', subClient:subClient||'', oneOff:false, createdAt:Date.now(), updatedAt:Date.now() };
       state.income.push(entry);
       sheetsAdd('income', entry);
       generated++;
     }
   });
 
-  // Expenses: key = category + vendor
+  // Expenses: template = latest recurring instance that is NOT a one-off override
   const expTemplates = new Map();
-  state.expenses.filter(e=>e.recurring).forEach(e=>{
-    const k = e.category + '\x00' + e.vendor;
+  state.expenses.filter(e=>e.recurring && !e.oneOff).forEach(e=>{
+    const k = expSeriesKey(e);
     if (!expTemplates.has(k) || e.date > expTemplates.get(k).date) expTemplates.set(k, e);
   });
   expTemplates.forEach((tmpl, k)=>{
-    const [category, vendor] = k.split('\x00');
+    if (isSeriesStoppedForMonth(k, currentMonth)) return;
+    const [, category, vendor] = k.split('\x00');
     const exists = state.expenses.some(e=>
       e.recurring && e.category===category && e.vendor===vendor && monthKey(e.date)===currentMonth
     );
     if (!exists) {
-      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', createdAt:Date.now() };
+      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', oneOff:false, createdAt:Date.now(), updatedAt:Date.now() };
       state.expenses.push(entry);
       sheetsAdd('expense', entry);
       generated++;
@@ -4150,6 +4176,233 @@ function generateRecurring(silent=false) {
   } else if (!silent) {
     showToast(`All monthly entries already exist for ${monthLabel(currentMonth)}`);
   }
+}
+
+// ── RENDER: Monthly (recurring series manager) ─────────────────
+// Groups every recurring entry into its series so the user can see each
+// monthly item once, drill into per-month instances, and edit/delete with
+// scope (this month / this + future / whole series).
+function buildSeries() {
+  const series = new Map(); // key -> { kind, key, label, sub, instances:[], stoppedFrom }
+  state.income.filter(e=>e.recurring).forEach(e=>{
+    const key = incSeriesKey(e);
+    if (!series.has(key)) {
+      const c = clientById(e.clientId);
+      series.set(key, { kind:'income', key, clientId:e.clientId,
+        label:(c?.name||'Unknown'), color:c?.color||'#888',
+        sub:[e.service, e.subClient].filter(Boolean).join(' · '),
+        instances:[], stoppedFrom:seriesStoppedFrom(key) });
+    }
+    series.get(key).instances.push(e);
+  });
+  state.expenses.filter(e=>e.recurring).forEach(e=>{
+    const key = expSeriesKey(e);
+    if (!series.has(key)) {
+      series.set(key, { kind:'expense', key,
+        label:(e.category||'—'), color:'var(--red)',
+        sub:e.vendor||'', instances:[], stoppedFrom:seriesStoppedFrom(key) });
+    }
+    series.get(key).instances.push(e);
+  });
+  series.forEach(s => s.instances.sort((a,b)=>b.date.localeCompare(a.date)));
+  return [...series.values()].sort((a,b)=>{
+    if (a.kind!==b.kind) return a.kind==='income'?-1:1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+let _monthlyExpanded = new Set();
+function toggleMonthlySeries(key) {
+  if (_monthlyExpanded.has(key)) _monthlyExpanded.delete(key); else _monthlyExpanded.add(key);
+  renderMonthly();
+}
+
+function renderMonthly() {
+  const cont = document.getElementById('monthlyList');
+  if (!cont) return;
+  const all = buildSeries();
+  const incomeSeries = all.filter(s=>s.kind==='income');
+  const expenseSeries = all.filter(s=>s.kind==='expense');
+
+  if (!all.length) {
+    cont.innerHTML = `<div class="empty-state"><i class="fa-solid fa-rotate"></i><p>No monthly items yet</p><small>Mark an income or expense as “Monthly” when you add it, and it will appear here.</small></div>`;
+    return;
+  }
+
+  const seriesCard = (s) => {
+    const latest = s.instances[0];
+    const amount = latest ? latest.amount : 0;
+    const months = s.instances.length;
+    const expanded = _monthlyExpanded.has(s.key);
+    const stopped = s.stoppedFrom !== null;
+    const rows = s.instances.map(e=>`
+      <div class="monthly-inst">
+        <span class="mi-month">${monthLabel(monthKey(e.date))}</span>
+        ${s.kind==='income'?`<span class="badge ${e.status.toLowerCase()} mini">${e.status.slice(0,3).toUpperCase()}</span>`:''}
+        <span class="mi-amount" style="${s.kind==='expense'?'color:var(--red)':''}">${fmt(e.amount)}</span>
+        <button class="mi-act" title="Edit this month" onclick="event.stopPropagation();openEditEntry('${s.kind}','${e.id}')"><i class="fa-solid fa-pen"></i></button>
+        <button class="mi-act" title="Delete" onclick="event.stopPropagation();monthlyDeletePrompt('${s.kind}','${e.id}')"><i class="fa-solid fa-trash"></i></button>
+      </div>`).join('');
+    return `
+      <div class="monthly-card ${expanded?'expanded':''}">
+        <div class="monthly-head" onclick="toggleMonthlySeries('${s.key}')">
+          <span class="monthly-dot" style="background:${s.color}"></span>
+          <div class="monthly-titles">
+            <div class="monthly-name">${s.label}${stopped?' <span class="badge mini" style="background:var(--red-light);color:var(--red)">STOPPED</span>':''}</div>
+            ${s.sub?`<div class="monthly-sub">${s.sub}</div>`:''}
+          </div>
+          <div class="monthly-meta">
+            <div class="monthly-amount" style="${s.kind==='expense'?'color:var(--red)':''}">${fmt(amount)}</div>
+            <div class="monthly-count">${months} month${months>1?'s':''}</div>
+          </div>
+          <i class="fa-solid fa-chevron-${expanded?'down':'right'} monthly-chev"></i>
+        </div>
+        ${expanded?`<div class="monthly-body">
+          ${rows}
+          <div class="monthly-series-actions">
+            <button class="ms-btn" onclick="monthlyEditAmountPrompt('${s.kind}','${s.key}')"><i class="fa-solid fa-pen"></i> Change amount</button>
+            ${stopped
+              ? `<button class="ms-btn" onclick="monthlyResumeSeries('${s.key}')"><i class="fa-solid fa-play"></i> Resume monthly</button>`
+              : `<button class="ms-btn ms-warn" onclick="monthlyStopSeries('${s.kind}','${s.key}')"><i class="fa-solid fa-stop"></i> Stop monthly</button>`}
+            <button class="ms-btn ms-danger" onclick="monthlyDeleteSeries('${s.kind}','${s.key}')"><i class="fa-solid fa-trash"></i> Delete series</button>
+          </div>
+        </div>`:''}
+      </div>`;
+  };
+
+  let html = '';
+  if (incomeSeries.length) {
+    html += `<div class="monthly-section-title"><i class="fa-solid fa-arrow-trend-up" style="color:var(--green)"></i> Monthly Income</div>`;
+    html += incomeSeries.map(seriesCard).join('');
+  }
+  if (expenseSeries.length) {
+    html += `<div class="monthly-section-title" style="margin-top:24px"><i class="fa-solid fa-arrow-trend-down" style="color:var(--red)"></i> Monthly Expenses</div>`;
+    html += expenseSeries.map(seriesCard).join('');
+  }
+  cont.innerHTML = html;
+}
+
+// Helper: all instances of a series, optionally only those in/after a month
+function seriesInstances(kind, key, fromMonth) {
+  const arr = kind==='income' ? state.income : state.expenses;
+  return arr.filter(e => e.recurring && seriesKeyOf(kind, e) === key &&
+    (!fromMonth || monthKey(e.date) >= fromMonth));
+}
+
+// ── Delete one monthly instance, with scope choice ─────────────
+let _monthlyPending = null; // { kind, id, key, month }
+function monthlyDeletePrompt(kind, id) {
+  const arr = kind==='income' ? state.income : state.expenses;
+  const e = arr.find(x=>x.id===id);
+  if (!e) return;
+  _monthlyPending = { kind, id, key:seriesKeyOf(kind,e), month:monthKey(e.date) };
+  openScopeDialog('delete', monthLabel(monthKey(e.date)));
+}
+
+function monthlyEditAmountPrompt(kind, key) {
+  const insts = seriesInstances(kind, key);
+  if (!insts.length) return;
+  const latest = insts.sort((a,b)=>b.date.localeCompare(a.date))[0];
+  _monthlyPending = { kind, id:latest.id, key, month:monthKey(latest.date), editAmount:true };
+  const cur = latest.amount;
+  const val = prompt('New monthly amount (€):', cur);
+  if (val === null) { _monthlyPending=null; return; }
+  const num = parseFloat(val);
+  if (isNaN(num) || num < 0) { showToast('Invalid amount','error'); _monthlyPending=null; return; }
+  _monthlyPending.newAmount = num;
+  openScopeDialog('edit', monthLabel(monthKey(latest.date)));
+}
+
+// Scope dialog: this month / this + future / whole series
+function openScopeDialog(action, monthLabelStr) {
+  const verb = action==='delete' ? 'Delete' : 'Apply change';
+  document.getElementById('scopeDialogTitle').textContent = `${verb} — choose scope`;
+  document.getElementById('scopeDialogMsg').textContent =
+    action==='delete'
+      ? `Which months should this deletion affect? (selected: ${monthLabelStr})`
+      : `Which months should the new amount apply to? (from: ${monthLabelStr})`;
+  document.getElementById('scopeDialog').dataset.action = action;
+  document.getElementById('scopeDialog').classList.add('open');
+  document.getElementById('modalOverlay').classList.remove('hidden');
+}
+function closeScopeDialog() {
+  document.getElementById('scopeDialog').classList.remove('open');
+  document.getElementById('modalOverlay').classList.add('hidden');
+  _monthlyPending = null;
+}
+
+function applyScope(scope) {
+  const p = _monthlyPending;
+  const action = document.getElementById('scopeDialog').dataset.action;
+  if (!p) { closeScopeDialog(); return; }
+  const arr = p.kind==='income' ? state.income : state.expenses;
+
+  if (action === 'delete') {
+    pushUndo('Delete monthly entry');
+    if (scope === 'this') {
+      addTombstone(p.id);
+      if (p.kind==='income') state.income = state.income.filter(e=>e.id!==p.id);
+      else state.expenses = state.expenses.filter(e=>e.id!==p.id);
+    } else if (scope === 'future') {
+      // Remove this + all future instances and stop the series from this month
+      seriesInstances(p.kind, p.key, p.month).forEach(e=>addTombstone(e.id));
+      if (p.kind==='income') state.income = state.income.filter(e=>!(seriesKeyOf('income',e)===p.key && monthKey(e.date)>=p.month));
+      else state.expenses = state.expenses.filter(e=>!(seriesKeyOf('expense',e)===p.key && monthKey(e.date)>=p.month));
+      state.monthlyStopped[p.key] = p.month;
+    } else { // whole series
+      seriesInstances(p.kind, p.key).forEach(e=>addTombstone(e.id));
+      if (p.kind==='income') state.income = state.income.filter(e=>seriesKeyOf('income',e)!==p.key);
+      else state.expenses = state.expenses.filter(e=>seriesKeyOf('expense',e)!==p.key);
+      state.monthlyStopped[p.key] = '0000-00'; // never regenerate
+    }
+    showToast('Monthly entry deleted');
+  } else { // edit amount
+    const newAmt = p.newAmount;
+    const apply = (e) => {
+      e.amount = newAmt;
+      if (e.paymentType === 'invoice') e.vatAmount = newAmt * VAT_RATE;
+      e.updatedAt = Date.now();
+    };
+    pushUndo('Change monthly amount');
+    if (scope === 'this') {
+      const e = arr.find(x=>x.id===p.id);
+      if (e) { apply(e); e.oneOff = true; } // one-off so future generations ignore it
+    } else if (scope === 'future') {
+      seriesInstances(p.kind, p.key, p.month).forEach(e=>{ apply(e); e.oneOff=false; });
+    } else { // whole series
+      seriesInstances(p.kind, p.key).forEach(e=>{ apply(e); e.oneOff=false; });
+    }
+    showToast('Monthly amount updated');
+  }
+  saveData();
+  closeScopeDialog();
+  renderMonthly();
+}
+
+function monthlyStopSeries(kind, key) {
+  if (!confirm('Stop generating this monthly item from now on? Past entries stay; no new months will be created.')) return;
+  state.monthlyStopped[key] = todayVal().slice(0,7);
+  saveData();
+  renderMonthly();
+  showToast('Monthly item stopped');
+}
+function monthlyResumeSeries(key) {
+  delete state.monthlyStopped[key];
+  saveData();
+  renderMonthly();
+  showToast('Monthly item resumed');
+}
+function monthlyDeleteSeries(kind, key) {
+  const insts = seriesInstances(kind, key);
+  if (!confirm(`Delete this entire monthly series and all its ${insts.length} entr${insts.length===1?'y':'ies'} across every month? This cannot be undone from other devices.`)) return;
+  pushUndo('Delete monthly series');
+  insts.forEach(e=>addTombstone(e.id));
+  if (kind==='income') state.income = state.income.filter(e=>seriesKeyOf('income',e)!==key);
+  else state.expenses = state.expenses.filter(e=>seriesKeyOf('expense',e)!==key);
+  state.monthlyStopped[key] = '0000-00';
+  saveData();
+  renderMonthly();
+  showToast('Monthly series deleted');
 }
 
 // ── Cloud Sync — Firebase Realtime Database ────────────────────
@@ -4351,6 +4604,8 @@ async function autoPull(silent) {
     const allDeletedIds = new Set([...(state.deletedIds||[]), ...(p.deletedIds||[])]);
     // Merge tombstone timestamps too so the 1-year prune window stays accurate
     const mergedDeletedAt = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
+    // Merge monthly "stopped" flags so a series stopped on one device stays stopped
+    const mergedStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
 
     const cloudIncomeIds  = new Set(cloudIncome.map(e => e.id));
     const cloudExpenseIds = new Set(cloudExpenses.map(e => e.id));
@@ -4387,6 +4642,7 @@ async function autoPull(silent) {
     state.services   = p.services || [...DEFAULT_SERVICES];
     state.deletedIds = [...allDeletedIds];
     state.deletedAt  = mergedDeletedAt;
+    state.monthlyStopped = mergedStopped;
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
@@ -4570,6 +4826,7 @@ async function autoPullForced() {
     state.services   = p.services || [...DEFAULT_SERVICES];
     state.deletedIds = [...allDeletedIdsF];
     state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
+    state.monthlyStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
     idbSet(STORAGE_KEY, state);
     // Remove any duplicate recurring entries from multi-device race
@@ -5006,7 +5263,7 @@ async function adoptUserBlob() {
   // previous user — wipe it instead of seeding it into the new account's blob
   const lastUid = localStorage.getItem(LAST_UID_KEY) || '';
   if (lastUid && lastUid !== authUid) {
-    state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{} };
+    state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{} };
     await idbSet(STORAGE_KEY, state);
     try { navigate(currentView); } catch(_) {}
   }

@@ -94,6 +94,7 @@
       <a class="nav-item" data-view="expenses" onclick="navigate('expenses')"><i class="fa-solid fa-arrow-trend-down"></i><span>Expenses</span></a>
       <a class="nav-item" data-view="clients" onclick="navigate('clients')"><i class="fa-solid fa-users"></i><span>Clients</span></a>
       <a class="nav-item" data-view="quickentry" onclick="navigate('quickentry')"><i class="fa-solid fa-table-cells"></i><span>Quick Entry</span></a>
+      <a class="nav-item" data-view="monthly" onclick="navigate('monthly')"><i class="fa-solid fa-rotate"></i><span>Monthly</span></a>
       <a class="nav-item" data-view="services" onclick="navigate('services')"><i class="fa-solid fa-briefcase"></i><span>Services</span></a>
       <a class="nav-item" data-view="reports" onclick="navigate('reports')"><i class="fa-solid fa-chart-bar"></i><span>Reports</span></a>
     </nav>
@@ -216,6 +217,15 @@
     <section class="view hidden" id="view-reports">
       <div class="reports-container" id="reportsContainer"></div>
     </section>
+
+    <!-- MONTHLY -->
+    <section class="view hidden" id="view-monthly">
+      <div class="monthly-intro">
+        <div class="section-title" style="margin:0">Monthly Items</div>
+        <p class="monthly-help">Every recurring income &amp; expense, one row each. Expand a row to see each month, edit a single month, or change/stop/delete the whole series.</p>
+      </div>
+      <div class="monthly-list" id="monthlyList"></div>
+    </section>
   </main>
 
   <!-- MOBILE BOTTOM NAV -->
@@ -229,6 +239,30 @@
 
   <!-- OVERLAY -->
   <div class="modal-overlay hidden" id="modalOverlay"></div>
+
+  <!-- MONTHLY SCOPE DIALOG -->
+  <div class="copy-dialog scope-dialog" id="scopeDialog">
+    <div class="scope-dialog-title" id="scopeDialogTitle">Choose scope</div>
+    <div class="scope-dialog-msg" id="scopeDialogMsg"></div>
+    <div class="scope-dialog-opts">
+      <button class="scope-opt" onclick="applyScope('this')">
+        <i class="fa-solid fa-calendar-day"></i>
+        <span class="scope-opt-main">Only this month</span>
+        <span class="scope-opt-sub">Other months stay exactly as they are</span>
+      </button>
+      <button class="scope-opt" onclick="applyScope('future')">
+        <i class="fa-solid fa-calendar-week"></i>
+        <span class="scope-opt-main">This month + all future</span>
+        <span class="scope-opt-sub">Past months unchanged; next ones follow</span>
+      </button>
+      <button class="scope-opt" onclick="applyScope('all')">
+        <i class="fa-solid fa-calendar"></i>
+        <span class="scope-opt-main">The whole series</span>
+        <span class="scope-opt-sub">Every month, past and future</span>
+      </button>
+    </div>
+    <button class="scope-cancel" onclick="closeScopeDialog()">Cancel</button>
+  </div>
 
   <!-- CLOUD SYNC MODAL -->
   <div class="sync-modal" id="syncModal">
