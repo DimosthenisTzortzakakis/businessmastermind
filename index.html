@@ -103,7 +103,7 @@
         <span class="sidebar-user-email" id="sidebarUserEmail"></span>
         <button class="sidebar-signout" onclick="doSignOut()" title="Sign out" aria-label="Sign out"><i class="fa-solid fa-right-from-bracket"></i></button>
       </div>
-      <button class="btn-sidebar-action" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate Recurring</button>
+      <button class="btn-sidebar-action" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate Monthly</button>
       <button class="btn-sidebar-action btn-cloud-sync" onclick="openSyncModal()"><i class="fa-solid fa-cloud"></i> Cloud Sync <span class="cloud-sync-dot cs-idle" id="cloudSyncDot"></span></button>
       <button class="btn-sidebar-action" onclick="exportData()"><i class="fa-solid fa-download"></i> Export JSON</button>
       <button class="btn-sidebar-action btn-excel-export" onclick="exportAllToExcel()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
@@ -137,7 +137,7 @@
       <div class="kpi-grid" id="kpiGrid"></div>
       <div class="recurring-banner" id="recurringBanner" style="display:none">
         <i class="fa-solid fa-rotate"></i>
-        <span><strong id="recurBannerCount">0</strong> recurring entries not yet added for <strong id="recurBannerMonth"></strong>.</span>
+        <span><strong id="recurBannerCount">0</strong> monthly entries not yet added for <strong id="recurBannerMonth"></strong>.</span>
         <button onclick="generateRecurring()"><i class="fa-solid fa-plus"></i> Generate Now</button>
       </div>
       <div class="vat-summary" id="vatSummary"></div>
@@ -396,7 +396,7 @@
         <input type="date" class="form-input" id="incomeDate" />
       </div>
       <div class="form-group">
-        <label class="form-label">Recurring Income?</label>
+        <label class="form-label">Monthly Income?</label>
         <div class="toggle-group">
           <button class="toggle-btn" id="incRecurringYes" onclick="setIncRecurring(true)"><i class="fa-solid fa-rotate"></i> Yes</button>
           <button class="toggle-btn active" id="incRecurringNo" onclick="setIncRecurring(false)"><i class="fa-solid fa-xmark"></i> No</button>

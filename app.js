@@ -1523,7 +1523,7 @@ function openEntryDetail(type, id) {
       <div class="ed-row"><span>Date</span><strong>${toDateStr(e.date)}</strong></div>
       <div class="ed-row"><span>Status</span><strong>${e.status}</strong></div>
       ${e.paidDate?`<div class="ed-row"><span>Paid on</span><strong style="color:var(--green)">${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</strong></div>`:''}
-      ${e.recurring?'<div class="ed-row"><span>Recurring</span><strong>Yes</strong></div>':''}
+      ${e.recurring?'<div class="ed-row"><span>Monthly</span><strong>Yes</strong></div>':''}
       ${e.notes?`<div class="ed-row"><span>Notes</span><strong>${e.notes}</strong></div>`:''}`;
   } else {
     const e = state.expenses.find(x=>x.id===id); if (!e) return;
@@ -1536,7 +1536,7 @@ function openEntryDetail(type, id) {
       ${e.vatAmount>0?`<div class="ed-row"><span>VAT</span><strong>${fmt(e.vatAmount)}</strong></div>`:''}
       <div class="ed-row"><span>Date</span><strong>${toDateStr(e.date)}</strong></div>
       <div class="ed-row"><span>Payment</span><strong>${e.paymentMethod}</strong></div>
-      ${e.recurring?'<div class="ed-row"><span>Recurring</span><strong>Yes</strong></div>':''}`;
+      ${e.recurring?'<div class="ed-row"><span>Monthly</span><strong>Yes</strong></div>':''}`;
   }
 
   let d = document.getElementById('entryDetailDialog');
@@ -3089,6 +3089,7 @@ function renderIncome() {
             <span class="ec-sep">·</span>
             <span class="ec-service">${e.service}${e.subClient?` <em style="opacity:.6">· ${e.subClient}</em>`:''}</span>
             <span class="ec-amount">${fmt(e.amount)}</span>
+            ${e.recurring?'<span class="badge monthly mini">MONTHLY</span>':''}
             <span class="badge ${e.paymentType} mini">${e.paymentType==='invoice'?'INV':'CASH'}</span>
             <span class="badge ${sl} mini">${e.status.slice(0,3).toUpperCase()}</span>
             ${eaInc(e.id)}
@@ -3142,7 +3143,7 @@ function renderIncome() {
         <td>${toDateStr(e.date)}</td>
         <td style="color:${c?.color||'var(--text)'}"><strong>${c?.name||'?'}</strong></td>
         <td>${e.subClient||'—'}</td>
-        <td>${e.service}</td>
+        <td>${e.service}${e.recurring?' <span class="badge monthly mini">MONTHLY</span>':''}</td>
         <td class="xls-num">${fmt(e.amount)}</td>
         <td class="xls-num" style="opacity:.7">${e.vatAmount>0?fmt(e.vatAmount):'—'}</td>
         <td><span class="badge ${sl} mini">${e.status}</span></td>
@@ -3277,6 +3278,7 @@ function renderExpenses() {
             <span class="ec-sep">·</span>
             <span class="ec-service">${e.vendor||e.description||'—'}</span>
             <span class="ec-amount" style="color:var(--red)">${fmt(e.amount)}</span>
+            ${e.recurring?'<span class="badge monthly mini">MONTHLY</span>':''}
             <span class="badge mini">${e.paymentMethod==='Credit Card'?'Card':'Cash'}</span>
             ${eaExp(e.id)}
           </div>`;
@@ -3300,7 +3302,7 @@ function renderExpenses() {
         <td class="xls-num" style="color:var(--red)">${fmt(e.amount)}</td>
         <td class="xls-num" style="opacity:.7">${e.vatAmount>0?fmt(e.vatAmount):'—'}</td>
         <td>${e.paymentMethod||'—'}</td>
-        <td>${e.recurring?'🔄 Yes':'No'}</td>
+        <td>${e.recurring?'<span class="badge monthly mini">MONTHLY</span>':'—'}</td>
         <td><div class="entry-actions" onclick="event.stopPropagation()">${eaExp(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
       </tr>`;
     }).join('');
@@ -3308,7 +3310,7 @@ function renderExpenses() {
       <table class="excel-table" id="expExcelTbl">
         <thead><tr>
           <th style="width:32px">#</th><th>Date</th><th>Category</th><th>Type</th>
-          <th>Description</th><th>Amount (€)</th><th>VAT (€)</th><th>Payment</th><th>Recurring</th><th style="width:90px"></th>
+          <th>Description</th><th>Amount (€)</th><th>VAT (€)</th><th>Payment</th><th>Monthly</th><th style="width:90px"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr>
@@ -3340,7 +3342,7 @@ function renderExpenses() {
             <span class="entry-card-client">${e.vendor||e.category}</span>
             <span class="entry-card-amount" style="color:var(--red)">${fmt(e.amount)}</span>
           </div>
-          <div class="entry-card-service">${e.category}${e.recurring?' · 🔄':''}</div>
+          <div class="entry-card-service">${e.category}${e.recurring?' <span class="badge monthly mini">MONTHLY</span>':''}</div>
           <div class="entry-card-footer">
             <span class="entry-card-date">${toDateStr(e.date)}</span>
             <span class="badge mini">${e.paymentMethod==='Credit Card'?'Card':'Cash'}</span>
@@ -4123,7 +4125,7 @@ function generateRecurring(silent=false) {
     renderView(currentView);
     showToast(`${generated} recurring entr${generated===1?'y':'ies'} added for ${monthLabel(currentMonth)}`);
   } else if (!silent) {
-    showToast(`All recurring entries already exist for ${monthLabel(currentMonth)}`);
+    showToast(`All monthly entries already exist for ${monthLabel(currentMonth)}`);
   }
 }
 

@@ -705,6 +705,7 @@ a { text-decoration: none; color: inherit; }
   text-transform: uppercase; letter-spacing: 0.3px;
 }
 .badge.invoice { background: var(--blue-light); color: var(--blue); }
+.badge.monthly { background: var(--accent-light); color: var(--accent-hover); }
 .badge.cash { background: rgba(255,255,255,0.08); color: var(--text-muted); }
 .badge.paid { background: var(--green-light); color: var(--green); }
 .badge.pending { background: var(--amber-light); color: var(--amber); }
