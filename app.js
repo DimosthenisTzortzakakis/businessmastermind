@@ -3177,9 +3177,9 @@ function renderIncome() {
         const grpIds = grp.map(e=>e.id);
         const allChecked = grpIds.every(id=>incSelectedIds.has(id));
         const someChecked = !allChecked && grpIds.some(id=>incSelectedIds.has(id));
-        html+=`<div class="byclient-group" data-cid="${cid}">
-          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}" onclick="${incBulkMode?'':`toggleClientGroup('${cid}')`}">
-            ${incBulkMode?`<input type="checkbox" class="bulk-cb bc-select-all-cb" title="Select all for ${c?.name||'client'}" ${allChecked?'checked':''} onclick="selectClientGroup('${cid}',event)" style="width:18px;height:18px;flex-shrink:0;accent-color:var(--accent)">`:'' }
+        html+=`<div class="byclient-group ${incBulkMode?'expanded':''}" data-cid="${cid}">
+          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}" onclick="${incBulkMode?`selectClientGroup('${cid}',event)`:`toggleClientGroup('${cid}')`}">
+            ${incBulkMode?`<input type="checkbox" class="bulk-cb bc-select-all-cb" title="Select all for ${c?.name||'client'}" ${allChecked?'checked':''} onclick="selectClientGroup('${cid}',event)" style="width:20px;height:20px;flex-shrink:0;accent-color:var(--accent)">`:'' }
             <div class="byclient-name">${av}<span>${c?.name||'Unknown'}</span></div>
             <div class="bc-meta">
               <span class="bc-count">${grp.length} payment${grp.length>1?'s':''}</span>
@@ -4206,8 +4206,14 @@ function buildSeries() {
 }
 
 let _monthlyExpanded = new Set();
-function toggleMonthlySeries(key) {
-  if (_monthlyExpanded.has(key)) _monthlyExpanded.delete(key); else _monthlyExpanded.add(key);
+let _monthlySeries = []; // cache so onclick handlers reference series by index
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Handlers reference the series by its index in _monthlySeries — the raw series
+// key contains NUL separators and user text that break inside HTML onclick.
+function toggleMonthlySeries(idx) {
+  const s = _monthlySeries[idx]; if (!s) return;
+  if (_monthlyExpanded.has(s.key)) _monthlyExpanded.delete(s.key); else _monthlyExpanded.add(s.key);
   renderMonthly();
 }
 
@@ -4215,6 +4221,7 @@ function renderMonthly() {
   const cont = document.getElementById('monthlyList');
   if (!cont) return;
   const all = buildSeries();
+  _monthlySeries = all;
   const incomeSeries = all.filter(s=>s.kind==='income');
   const expenseSeries = all.filter(s=>s.kind==='expense');
 
@@ -4224,6 +4231,7 @@ function renderMonthly() {
   }
 
   const seriesCard = (s) => {
+    const idx = all.indexOf(s);
     const latest = s.instances[0];
     const amount = latest ? latest.amount : 0;
     const months = s.instances.length;
@@ -4239,11 +4247,11 @@ function renderMonthly() {
       </div>`).join('');
     return `
       <div class="monthly-card ${expanded?'expanded':''}">
-        <div class="monthly-head" onclick="toggleMonthlySeries('${s.key}')">
+        <div class="monthly-head" onclick="toggleMonthlySeries(${idx})">
           <span class="monthly-dot" style="background:${s.color}"></span>
           <div class="monthly-titles">
-            <div class="monthly-name">${s.label}${stopped?' <span class="badge mini" style="background:var(--red-light);color:var(--red)">STOPPED</span>':''}</div>
-            ${s.sub?`<div class="monthly-sub">${s.sub}</div>`:''}
+            <div class="monthly-name">${esc(s.label)}${stopped?' <span class="badge mini" style="background:var(--red-light);color:var(--red)">STOPPED</span>':''}</div>
+            ${s.sub?`<div class="monthly-sub">${esc(s.sub)}</div>`:''}
           </div>
           <div class="monthly-meta">
             <div class="monthly-amount" style="${s.kind==='expense'?'color:var(--red)':''}">${fmt(amount)}</div>
@@ -4254,11 +4262,11 @@ function renderMonthly() {
         ${expanded?`<div class="monthly-body">
           ${rows}
           <div class="monthly-series-actions">
-            <button class="ms-btn" onclick="monthlyEditAmountPrompt('${s.kind}','${s.key}')"><i class="fa-solid fa-pen"></i> Change amount</button>
+            <button class="ms-btn" onclick="monthlyEditAmountPrompt(${idx})"><i class="fa-solid fa-pen"></i> Change amount</button>
             ${stopped
-              ? `<button class="ms-btn" onclick="monthlyResumeSeries('${s.key}')"><i class="fa-solid fa-play"></i> Resume monthly</button>`
-              : `<button class="ms-btn ms-warn" onclick="monthlyStopSeries('${s.kind}','${s.key}')"><i class="fa-solid fa-stop"></i> Stop monthly</button>`}
-            <button class="ms-btn ms-danger" onclick="monthlyDeleteSeries('${s.kind}','${s.key}')"><i class="fa-solid fa-trash"></i> Delete series</button>
+              ? `<button class="ms-btn" onclick="monthlyResumeSeries(${idx})"><i class="fa-solid fa-play"></i> Resume monthly</button>`
+              : `<button class="ms-btn ms-warn" onclick="monthlyStopSeries(${idx})"><i class="fa-solid fa-stop"></i> Stop monthly</button>`}
+            <button class="ms-btn ms-danger" onclick="monthlyDeleteSeries(${idx})"><i class="fa-solid fa-trash"></i> Delete series</button>
           </div>
         </div>`:''}
       </div>`;
@@ -4293,7 +4301,9 @@ function monthlyDeletePrompt(kind, id) {
   openScopeDialog('delete', monthLabel(monthKey(e.date)));
 }
 
-function monthlyEditAmountPrompt(kind, key) {
+function monthlyEditAmountPrompt(idx) {
+  const sObj = _monthlySeries[idx]; if (!sObj) return;
+  const kind = sObj.kind, key = sObj.key;
   const insts = seriesInstances(kind, key);
   if (!insts.length) return;
   const latest = insts.sort((a,b)=>b.date.localeCompare(a.date))[0];
@@ -4373,20 +4383,24 @@ function applyScope(scope) {
   renderMonthly();
 }
 
-function monthlyStopSeries(kind, key) {
+function monthlyStopSeries(idx) {
+  const sObj = _monthlySeries[idx]; if (!sObj) return;
   if (!confirm('Stop generating this monthly item from now on? Past entries stay; no new months will be created.')) return;
-  state.monthlyStopped[key] = todayVal().slice(0,7);
+  state.monthlyStopped[sObj.key] = todayVal().slice(0,7);
   saveData();
   renderMonthly();
   showToast('Monthly item stopped');
 }
-function monthlyResumeSeries(key) {
-  delete state.monthlyStopped[key];
+function monthlyResumeSeries(idx) {
+  const sObj = _monthlySeries[idx]; if (!sObj) return;
+  delete state.monthlyStopped[sObj.key];
   saveData();
   renderMonthly();
   showToast('Monthly item resumed');
 }
-function monthlyDeleteSeries(kind, key) {
+function monthlyDeleteSeries(idx) {
+  const sObj = _monthlySeries[idx]; if (!sObj) return;
+  const kind = sObj.kind, key = sObj.key;
   const insts = seriesInstances(kind, key);
   if (!confirm(`Delete this entire monthly series and all its ${insts.length} entr${insts.length===1?'y':'ies'} across every month? This cannot be undone from other devices.`)) return;
   pushUndo('Delete monthly series');
