@@ -104,11 +104,7 @@
         <span class="sidebar-user-email" id="sidebarUserEmail"></span>
         <button class="sidebar-signout" onclick="doSignOut()" title="Sign out" aria-label="Sign out"><i class="fa-solid fa-right-from-bracket"></i></button>
       </div>
-      <button class="btn-sidebar-action" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate Monthly</button>
-      <button class="btn-sidebar-action btn-cloud-sync" onclick="openSyncModal()"><i class="fa-solid fa-cloud"></i> Cloud Sync <span class="cloud-sync-dot cs-idle" id="cloudSyncDot"></span></button>
-      <button class="btn-sidebar-action" onclick="exportData()"><i class="fa-solid fa-download"></i> Export JSON</button>
       <button class="btn-sidebar-action btn-excel-export" onclick="exportAllToExcel()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
-      <button class="btn-sidebar-action" onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-upload"></i> Import JSON</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
     </div>
   </aside>
@@ -221,7 +217,10 @@
     <!-- MONTHLY -->
     <section class="view hidden" id="view-monthly">
       <div class="monthly-intro">
-        <div class="section-title" style="margin:0">Monthly Items</div>
+        <div class="monthly-intro-row">
+          <div class="section-title" style="margin:0">Monthly Items</div>
+          <button class="btn-generate-monthly" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate this month</button>
+        </div>
         <p class="monthly-help">Every recurring income &amp; expense, one row each. Expand a row to see each month, edit a single month, or change/stop/delete the whole series.</p>
       </div>
       <div class="monthly-list" id="monthlyList"></div>
@@ -301,6 +300,14 @@
         <div class="sync-btns-row">
           <button id="cloudPushBtn" class="btn-sync-action btn-push" onclick="cloudPush()"><i class="fa-solid fa-cloud-arrow-up"></i> Force Push</button>
           <button id="cloudPullBtn" class="btn-sync-action btn-pull" onclick="cloudPull()"><i class="fa-solid fa-cloud-arrow-down"></i> Force Pull</button>
+        </div>
+      </div>
+
+      <div class="sync-section sync-actions-section">
+        <div class="sync-section-label">Backup (local file)</div>
+        <div class="sync-btns-row">
+          <button class="btn-sync-action" onclick="exportData()"><i class="fa-solid fa-download"></i> Export JSON</button>
+          <button class="btn-sync-action" onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-upload"></i> Import JSON</button>
         </div>
       </div>
 

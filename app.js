@@ -1,7 +1,10 @@
 'use strict';
 
 // ── Google Sheets Config ───────────────────────────────────────
-let SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwpnWWC_FLbbSj5WU5pVOT5-62VRt0YNjzlNhTwGgDu9JmNdHLD9o5gYX8Zvje1fY3X/exec';
+// Legacy Google Sheets sync — disabled. Firebase is the sole sync now.
+// The Sheets pull was destructive (overwrote local data with stale rows and
+// stripped the income "recurring" flag), so it is turned off entirely.
+let SCRIPT_URL = '';
 
 const STORAGE_KEY    = 'biz_mastermind_data';
 const QE_GRID_KEY    = 'biz_qe_grid';
@@ -126,11 +129,11 @@ let dashMonth = 'all';
 
 // Income filters
 let incMonth='all', incClient='all', incStatus='all', incPayType='all';
-let incViewMode = 'detailed'; // 'byclient' | 'detailed' | 'cards'
+let incViewMode = 'byclient'; // 'byclient' | 'detailed' | 'excel'
 
 // Expense filters
 let expMonth='all', expCategory='all';
-let expViewMode = 'detailed';
+let expViewMode = 'bycategory'; // 'bycategory' | 'detailed' | 'excel'
 
 // Split payment
 let incSplitMode = false;
@@ -400,6 +403,9 @@ function loadUIState() {
     if (s.expMonth)              expMonth              = s.expMonth;
     if (s.expCategory)           expCategory           = s.expCategory;
     if (s.expViewMode)           expViewMode           = s.expViewMode;
+    // 'cards' view was removed — migrate any saved preference
+    if (incViewMode==='cards') incViewMode = 'byclient';
+    if (expViewMode==='cards') expViewMode = 'bycategory';
     if (s.qeTab)                 qeTab                 = s.qeTab;
     if (s.qeGridMonth)           qeGridMonth           = s.qeGridMonth;
     if (s.qeGridService)         qeGridService         = s.qeGridService;
@@ -508,18 +514,27 @@ function toggleAutoSync() {
 }
 
 function normalizeIncome(e) {
-  return {
+  const out = {
     id: String(e.id||genId()), clientId: String(e.clientId||''),
     subClient: String(e.subClient||''), service: String(e.service||''),
     amount: parseFloat(e.amount)||0, vatAmount: parseFloat(e.vatAmount)||0,
     paymentType: String(e.paymentType||'cash'), date: String(e.date||''),
     status: String(e.status||'Paid'), notes: String(e.notes||''),
+    recurring: e.recurring===true||e.recurring==='TRUE'||e.recurring==='true',
     createdAt: Number(e.createdAt)||Date.now(),
   };
+  // Preserve optional fields so sync/import never silently drops them
+  if (e.qty!=null) out.qty = parseFloat(e.qty)||0;
+  if (e.unitPrice!=null) out.unitPrice = parseFloat(e.unitPrice)||0;
+  if (e.updatedAt!=null) out.updatedAt = Number(e.updatedAt)||0;
+  if (e.splitGroupId) out.splitGroupId = String(e.splitGroupId);
+  if (e.paidDate!=null) out.paidDate = Number(e.paidDate)||0;
+  if (e.oneOff) out.oneOff = true;
+  return out;
 }
 
 function normalizeExpense(e) {
-  return {
+  const out = {
     id: String(e.id||genId()), category: String(e.category||''),
     vendor: String(e.vendor||''), description: String(e.description||''),
     amount: parseFloat(e.amount)||0, vatAmount: parseFloat(e.vatAmount)||0,
@@ -527,6 +542,9 @@ function normalizeExpense(e) {
     recurring: e.recurring===true||e.recurring==='TRUE'||e.recurring==='true',
     date: String(e.date||''), createdAt: Number(e.createdAt)||Date.now(),
   };
+  if (e.updatedAt!=null) out.updatedAt = Number(e.updatedAt)||0;
+  if (e.oneOff) out.oneOff = true;
+  return out;
 }
 
 function sheetsAdd(type, entry) {
@@ -3074,7 +3092,7 @@ function renderIncome() {
   </div>`;
 
   const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('detailed','list-ul','Detailed')}${vtInc('cards','grip','Cards')}${vtInc('excel','table','Excel')}</div><button class="vtb ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Bulk select"><i class="fa-solid fa-check-square"></i><span class="vtb-label">Select</span></button></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('detailed','list-ul','Detailed')}${vtInc('excel','table','Excel')}</div><button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
 
   let entries = [...state.income];
   if (incMonth!=='all')   entries=entries.filter(e=>monthKey(e.date)===incMonth);
@@ -3172,31 +3190,25 @@ function renderIncome() {
     const totalAll  = entries.reduce((s,e)=>s+e.amount,0);
     const rows = entries.map((e,i)=>{
       const c=clientById(e.clientId); const sl=e.status.toLowerCase();
-      return `<tr class="xls-row-${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:''}">
-        <td class="xls-idx">${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:`${i+1}`}</td>
-        <td>${toDateStr(e.date)}</td>
-        <td style="color:${c?.color||'var(--text)'}"><strong>${c?.name||'?'}</strong></td>
-        <td>${e.subClient||'—'}</td>
+      return `<tr class="xls-row-${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
+        <td>${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:toDateStr(e.date)}</td>
+        <td style="color:${c?.color||'var(--text)'}"><strong>${c?.name||'?'}</strong>${e.subClient?`<span class="xls-subclient">${e.subClient}</span>`:''}</td>
         <td>${e.service}${e.recurring?' <span class="badge monthly mini">MONTHLY</span>':''}</td>
         <td class="xls-num">${fmt(e.amount)}</td>
-        <td class="xls-num" style="opacity:.7">${e.vatAmount>0?fmt(e.vatAmount):'—'}</td>
         <td><span class="badge ${sl} mini">${e.status}</span></td>
-        <td><span class="badge ${e.paymentType} mini">${e.paymentType==='invoice'?'Invoice':'Cash'}</span></td>
-        <td class="xls-note">${e.notes||'—'}</td>
-        <td><div class="entry-actions" onclick="event.stopPropagation()">${eaInc(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
+        <td class="xls-actions-cell"><div class="entry-actions" onclick="event.stopPropagation()">${eaInc(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
       </tr>`;
     }).join('');
     html+=`<div class="excel-wrapper">
-      <table class="excel-table" id="incExcelTbl">
+      <table class="excel-table excel-minimal" id="incExcelTbl">
         <thead><tr>
-          <th style="width:32px">#</th><th>Date</th><th>Client</th><th>Subclient</th>
-          <th>Service</th><th>Amount (€)</th><th>VAT (€)</th><th>Status</th><th>Type</th><th>Notes</th><th style="width:90px"></th>
+          <th>Date</th><th>Client</th><th>Service</th><th class="xls-num">Amount</th><th>Status</th><th style="width:70px"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr>
-          <td colspan="5" class="xls-foot-label">TOTAL PAID / ALL</td>
+          <td colspan="3" class="xls-foot-label">Total paid / all</td>
           <td class="xls-num xls-foot-val">${fmt(totalPaid)} / ${fmt(totalAll)}</td>
-          <td colspan="5"></td>
+          <td colspan="2"></td>
         </tr></tfoot>
       </table>
       <button class="excel-copy-btn" onclick="copyExcelTable('incExcelTbl')"><i class="fa-solid fa-copy"></i> Copy to clipboard (paste in Excel)</button>
@@ -3213,40 +3225,19 @@ function renderIncome() {
     const total=grp.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
     html+=`<div class="month-group"><div class="month-group-header"><span>${monthLabel(key)}</span><span class="month-group-total">${fmt(total)}</span></div>`;
 
-    if (incViewMode==='cards') {
-      html+='<div class="entries-cards-grid">';
-      grp.forEach(e=>{
-        const c=clientById(e.clientId); const sl=e.status.toLowerCase();
-        html+=`<div class="entry-card ${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
-          ${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)" style="margin:0 0 6px 0">`:'' }
-          <div class="entry-card-top" style="border-left:3px solid ${c?.color||'#888'}">
-            <span class="entry-card-client">${c?.name||'?'}</span>
-            <span class="entry-card-amount">${fmt(e.amount)}</span>
-          </div>
-          <div class="entry-card-service">${e.service}</div>
-          <div class="entry-card-footer">
-            <span class="entry-card-date">${toDateStr(e.date)}</span>
-            <span class="badge ${e.paymentType} mini">${e.paymentType==='invoice'?'INV':'CASH'}</span>
-            <span class="badge ${sl} mini">${e.status.slice(0,3).toUpperCase()}</span>
-          </div>
-          ${eaInc(e.id)}
-        </div>`;
-      });
-      html+='</div>';
-    } else {
-      html += '<div class="simple-list">';
-      grp.forEach(e=>{
-        const c=clientById(e.clientId); const sl=e.status.toLowerCase();
-        html+=`<div class="sl-row ${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
-          ${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:'' }
-          <span class="sl-date">${toDateStr(e.date)}</span>
-          <span class="sl-client" style="color:${c?.color||'var(--text)'}">${c?.name||'Unknown'}</span>
-          <span class="sl-amount ${sl}">${fmt(e.amount)}${e.paidDate?`<span class="sl-paiddate">Paid ${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</span>`:''}</span>
-          ${eaInc(e.id)}
-        </div>`;
-      });
-      html += '</div>';
-    }
+    html += '<div class="simple-list">';
+    grp.forEach(e=>{
+      const c=clientById(e.clientId); const sl=e.status.toLowerCase();
+      html+=`<div class="sl-row ${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
+        ${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:'' }
+        <span class="sl-date">${toDateStr(e.date)}</span>
+        <span class="sl-client" style="color:${c?.color||'var(--text)'}">${c?.name||'Unknown'}</span>
+        ${e.recurring?'<span class="badge monthly mini">MONTHLY</span>':''}
+        <span class="sl-amount ${sl}">${fmt(e.amount)}${e.paidDate?`<span class="sl-paiddate">Paid ${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</span>`:''}</span>
+        ${eaInc(e.id)}
+      </div>`;
+    });
+    html += '</div>';
     html+='</div>';
   });
   cont.innerHTML = html;
@@ -3273,7 +3264,7 @@ function renderExpenses() {
     </div>
   </div>`;
   const vtExp = (m,icon,label) => `<button class="vtb ${expViewMode===m?'active':''}" title="${label}" onclick="setExpViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('detailed','list-ul','Detailed')}${vtExp('cards','grip','Cards')}${vtExp('excel','table','Excel')}</div></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('detailed','list-ul','Detailed')}${vtExp('excel','table','Excel')}</div></div>`;
 
   let entries = [...state.expenses];
   if (expMonth!=='all')    entries=entries.filter(e=>monthKey(e.date)===expMonth);
@@ -3327,30 +3318,24 @@ function renderExpenses() {
     const totalAll = entries.reduce((s,e)=>s+e.amount,0);
     const rows = entries.map((e,i)=>{
       const icon=CATEGORY_ICONS[e.category]||'📦';
-      return `<tr>
-        <td class="xls-idx">${i+1}</td>
+      return `<tr onclick="openEntryDetail('expense','${e.id}')">
         <td>${toDateStr(e.date)}</td>
-        <td>${icon} ${e.category||'—'}</td>
+        <td>${icon} ${e.category||'—'}${e.recurring?' <span class="badge monthly mini">MONTHLY</span>':''}</td>
         <td>${e.vendor||'—'}</td>
-        <td class="xls-note">${e.description||'—'}</td>
         <td class="xls-num" style="color:var(--red)">${fmt(e.amount)}</td>
-        <td class="xls-num" style="opacity:.7">${e.vatAmount>0?fmt(e.vatAmount):'—'}</td>
-        <td>${e.paymentMethod||'—'}</td>
-        <td>${e.recurring?'<span class="badge monthly mini">MONTHLY</span>':'—'}</td>
-        <td><div class="entry-actions" onclick="event.stopPropagation()">${eaExp(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
+        <td class="xls-actions-cell"><div class="entry-actions" onclick="event.stopPropagation()">${eaExp(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
       </tr>`;
     }).join('');
     html+=`<div class="excel-wrapper">
-      <table class="excel-table" id="expExcelTbl">
+      <table class="excel-table excel-minimal" id="expExcelTbl">
         <thead><tr>
-          <th style="width:32px">#</th><th>Date</th><th>Category</th><th>Type</th>
-          <th>Description</th><th>Amount (€)</th><th>VAT (€)</th><th>Payment</th><th>Monthly</th><th style="width:90px"></th>
+          <th>Date</th><th>Category</th><th>Vendor</th><th class="xls-num">Amount</th><th style="width:70px"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr>
-          <td colspan="5" class="xls-foot-label">TOTAL</td>
+          <td colspan="3" class="xls-foot-label">Total</td>
           <td class="xls-num xls-foot-val" style="color:var(--red)">${fmt(totalAll)}</td>
-          <td colspan="4"></td>
+          <td></td>
         </tr></tfoot>
       </table>
       <button class="excel-copy-btn" onclick="copyExcelTable('expExcelTbl')"><i class="fa-solid fa-copy"></i> Copy to clipboard (paste in Excel)</button>
@@ -3366,38 +3351,19 @@ function renderExpenses() {
     const total=grp.reduce((s,e)=>s+e.amount,0);
     html+=`<div class="month-group"><div class="month-group-header"><span>${monthLabel(key)}</span><span style="color:var(--red);font-size:13px;font-weight:700">${fmt(total)}</span></div>`;
 
-    if (expViewMode==='cards') {
-      html+='<div class="entries-cards-grid">';
-      grp.forEach(e=>{
-        const icon=CATEGORY_ICONS[e.category]||'📦';
-        html+=`<div class="entry-card expense-card" onclick="openEntryDetail('expense','${e.id}')">
-          <div class="entry-card-top exp-top">
-            <span class="entry-card-icon">${icon}</span>
-            <span class="entry-card-client">${e.vendor||e.category}</span>
-            <span class="entry-card-amount" style="color:var(--red)">${fmt(e.amount)}</span>
-          </div>
-          <div class="entry-card-service">${e.category}${e.recurring?' <span class="badge monthly mini">MONTHLY</span>':''}</div>
-          <div class="entry-card-footer">
-            <span class="entry-card-date">${toDateStr(e.date)}</span>
-            <span class="badge mini">${e.paymentMethod==='Credit Card'?'Card':'Cash'}</span>
-          </div>
-          ${eaExp(e.id)}
-        </div>`;
-      });
-      html+='</div>';
-    } else {
-      html += '<div class="simple-list">';
-      grp.forEach(e=>{
-        const typeLabel = e.vendor || e.category;
-        html+=`<div class="sl-row" onclick="openEntryDetail('expense','${e.id}')">
-          <span class="sl-date">${toDateStr(e.date)}</span>
-          <span class="sl-client">${typeLabel}</span>
-          <span class="sl-amount" style="color:var(--red)">${fmt(e.amount)}</span>
-          ${eaExp(e.id)}
-        </div>`;
-      });
-      html += '</div>';
-    }
+    html += '<div class="simple-list">';
+    grp.forEach(e=>{
+      const icon=CATEGORY_ICONS[e.category]||'📦';
+      const typeLabel = e.vendor || e.category;
+      html+=`<div class="sl-row" onclick="openEntryDetail('expense','${e.id}')">
+        <span class="sl-date">${toDateStr(e.date)}</span>
+        <span class="sl-client"><span class="sl-cat-icon">${icon}</span> ${typeLabel}</span>
+        ${e.recurring?'<span class="badge monthly mini">MONTHLY</span>':''}
+        <span class="sl-amount" style="color:var(--red)">${fmt(e.amount)}</span>
+        ${eaExp(e.id)}
+      </div>`;
+    });
+    html += '</div>';
     html+='</div>';
   });
   cont.innerHTML = html;
