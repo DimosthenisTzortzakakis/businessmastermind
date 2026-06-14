@@ -432,6 +432,26 @@ function addTombstone(id) {
 
 const TOMBSTONE_TTL = 365 * 24 * 60 * 60 * 1000; // 1 year
 
+// Merge two versions of the SAME income entry (local le + cloud ce) with
+// field-level resolution for `status`. Whole-object last-write-wins would lose
+// a Paid/Pending change made on one device when the other device edited the
+// amount; here status is resolved by its own timestamp so neither is lost.
+function mergeIncomeEntry(le, ce) {
+  const leTs = le.updatedAt || le.createdAt || 0;
+  const ceTs = ce.updatedAt || ce.createdAt || 0;
+  const winner = leTs >= ceTs ? le : ce; // newer object wins for non-status fields
+  // Resolve status independently using its own timestamp (fall back to the
+  // object timestamp for legacy entries without statusUpdatedAt)
+  const leSt = le.statusUpdatedAt || leTs;
+  const ceSt = ce.statusUpdatedAt || ceTs;
+  const statusSrc = leSt >= ceSt ? le : ce;
+  if (statusSrc.status === winner.status) return winner;
+  const merged = { ...winner, status: statusSrc.status, statusUpdatedAt: Math.max(leSt, ceSt) };
+  if (statusSrc.status === 'Paid') { if (statusSrc.paidDate) merged.paidDate = statusSrc.paidDate; }
+  else delete merged.paidDate;
+  return merged;
+}
+
 function saveData() {
   state.lastModified = Date.now();
   // Prune tombstones only when they are older than a full year. Pruning by
@@ -529,6 +549,7 @@ function normalizeIncome(e) {
   if (e.updatedAt!=null) out.updatedAt = Number(e.updatedAt)||0;
   if (e.splitGroupId) out.splitGroupId = String(e.splitGroupId);
   if (e.paidDate!=null) out.paidDate = Number(e.paidDate)||0;
+  if (e.statusUpdatedAt!=null) out.statusUpdatedAt = Number(e.statusUpdatedAt)||0;
   if (e.oneOff) out.oneOff = true;
   return out;
 }
@@ -1376,7 +1397,7 @@ function saveIncome() {
 
     const sgId = genId(); // shared group id links the two halves
     const base = { clientId, subClient, service, date:rawDate, status:incomeStatus, notes,
-                   recurring:incRecurring, splitGroupId:sgId, createdAt:Date.now() };
+                   recurring:incRecurring, splitGroupId:sgId, createdAt:Date.now(), statusUpdatedAt:Date.now() };
     const entries = [];
     if (invAmt>0)  entries.push({ ...base, id:genId(), amount:invAmt,  vatAmount:invAmt*VAT_RATE, paymentType:'invoice' });
     if (cashAmt>0) entries.push({ ...base, id:genId(), amount:cashAmt, vatAmount:0,               paymentType:'cash' });
@@ -1404,6 +1425,7 @@ function saveIncome() {
       else if (incomeStatus !== 'Paid') paidDate = undefined;
       const updated = { ...prev, clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, updatedAt:Date.now() };
       if (paidDate) updated.paidDate = paidDate; else delete updated.paidDate;
+      if (prev.status !== incomeStatus) updated.statusUpdatedAt = Date.now();
       // Editing a single month of a monthly series is a per-month override —
       // mark it so it doesn't become the template for future auto-generation
       if (incRecurring && prev.recurring && (prev.amount !== amount)) updated.oneOff = true;
@@ -1415,7 +1437,7 @@ function saveIncome() {
     showToast('Income entry updated');
     renderView(currentView);
   } else {
-    const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now() };
+    const entry = { id:genId(), clientId, subClient, service, amount, vatAmount, paymentType:incomePaymentType, date:rawDate, status:incomeStatus, notes, recurring:incRecurring, qty, unitPrice, createdAt:Date.now(), statusUpdatedAt:Date.now() };
     if (incomeStatus === 'Paid') entry.paidDate = Date.now();
     // Manually adding a monthly entry revives a previously stopped series
     if (incRecurring && state.monthlyStopped) delete state.monthlyStopped[incSeriesKey(entry)];
@@ -2142,7 +2164,7 @@ function toggleQERowStatus(dateStr) {
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
   const now = Date.now();
-  entries.forEach(e => { e.status = newStatus; e.updatedAt = now; });
+  entries.forEach(e => { e.status = newStatus; e.updatedAt = now; e.statusUpdatedAt = now; if (newStatus==='Paid') e.paidDate = now; else delete e.paidDate; });
   saveData();
   const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
   if (cell) applyQETotalColor(cell, newStatus);
@@ -2158,7 +2180,7 @@ function toggleQEClientDayStatus(cid, dateStr) {
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
   const nowD = Date.now();
-  entries.forEach(e => { e.status = newStatus; e.updatedAt = nowD; });
+  entries.forEach(e => { e.status = newStatus; e.updatedAt = nowD; e.statusUpdatedAt = nowD; if (newStatus==='Paid') e.paidDate = nowD; else delete e.paidDate; });
   saveData();
   // Update this client total cell color
   const ct = document.querySelector('.qe-client-total[data-client="'+cid+'"][data-date="'+dateStr+'"]');
@@ -2192,7 +2214,7 @@ function toggleQEClientStatus(cid) {
   const currentStatus = entries.some(e => e.status === 'Pending') ? 'Pending' : 'Paid';
   const newStatus = currentStatus === 'Paid' ? 'Pending' : 'Paid';
   const nowC = Date.now();
-  entries.forEach(e => { e.status = newStatus; e.updatedAt = nowC; });
+  entries.forEach(e => { e.status = newStatus; e.updatedAt = nowC; e.statusUpdatedAt = nowC; if (newStatus==='Paid') e.paidDate = nowC; else delete e.paidDate; });
   saveData();
   // Refresh all day-total colors for the affected dates
   const affectedDates = new Set(entries.map(e => e.date));
@@ -3047,6 +3069,7 @@ function bulkMarkIncome(status) {
     if (incSelectedIds.has(e.id)) {
       e.status = status;
       e.updatedAt = now;
+      e.statusUpdatedAt = now;
       if (status === 'Paid') e.paidDate = now;
       else delete e.paidDate;
     }
@@ -4063,6 +4086,7 @@ function revertTodayPaidToMonth(month) {
         e.status = 'Pending';
         delete e.paidDate;
         e.updatedAt = Date.now();
+        e.statusUpdatedAt = Date.now();
         reverted++;
       }
     }
@@ -4584,9 +4608,7 @@ async function autoPull(silent) {
       .map(ce => {
         const le = localIncMap.get(ce.id);
         if (!le) return ce; // new on cloud, add it
-        const leTs = le.updatedAt || le.createdAt || 0;
-        const ceTs = ce.updatedAt || ce.createdAt || 0;
-        return leTs > ceTs ? le : ce; // newer wins; on a tie prefer cloud so stale untimestamped local copies converge
+        return mergeIncomeEntry(le, ce);
       });
     const mergedExpenses = cloudExpenses
       .filter(ce => !allDeletedIds.has(ce.id))
@@ -4782,7 +4804,9 @@ async function autoPullForced() {
     const allDeletedIdsF = new Set([...(state.deletedIds||[]), ...(p.deletedIds||[])]);
     const cloudIncomeIds  = new Set(cloudIncome.map(e => e.id));
     const cloudExpenseIds = new Set(cloudExpenses.map(e => e.id));
-    const filteredCloudIncome   = cloudIncome.filter(e => !allDeletedIdsF.has(e.id));
+    const localIncMapF = new Map((state.income||[]).map(e=>[e.id,e]));
+    const filteredCloudIncome   = cloudIncome.filter(e => !allDeletedIdsF.has(e.id))
+      .map(ce => { const le = localIncMapF.get(ce.id); return le ? mergeIncomeEntry(le, ce) : ce; });
     const filteredCloudExpenses = cloudExpenses.filter(e => !allDeletedIdsF.has(e.id));
     const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id)  && !allDeletedIdsF.has(e.id));
     const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id) && !allDeletedIdsF.has(e.id));
