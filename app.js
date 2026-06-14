@@ -403,9 +403,9 @@ function loadUIState() {
     if (s.expMonth)              expMonth              = s.expMonth;
     if (s.expCategory)           expCategory           = s.expCategory;
     if (s.expViewMode)           expViewMode           = s.expViewMode;
-    // 'cards' view was removed — migrate any saved preference
-    if (incViewMode==='cards') incViewMode = 'byclient';
-    if (expViewMode==='cards') expViewMode = 'bycategory';
+    // 'cards' and 'detailed' views were removed — migrate any saved preference
+    if (incViewMode==='cards' || incViewMode==='detailed') incViewMode = 'byclient';
+    if (expViewMode==='cards' || expViewMode==='detailed') expViewMode = 'bycategory';
     if (s.qeTab)                 qeTab                 = s.qeTab;
     if (s.qeGridMonth)           qeGridMonth           = s.qeGridMonth;
     if (s.qeGridService)         qeGridService         = s.qeGridService;
@@ -623,7 +623,11 @@ function _openSheet(id) {
   document.getElementById('modalOverlay').classList.remove('hidden');
   const el = document.getElementById(id);
   el.classList.remove('hidden');
-  requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('open')));
+  // Force a reflow then add 'open' — reliable trigger for the CSS transition.
+  // (double-rAF could silently skip if the frame loop was paused, leaving the
+  // sheet stuck off-screen — that was the "edit button does nothing" bug.)
+  void el.offsetWidth;
+  el.classList.add('open');
   // Hide bottom nav so it never blocks the sheet's save button
   const nav = document.querySelector('.bottom-nav');
   if (nav) nav.style.display = 'none';
@@ -3115,7 +3119,7 @@ function renderIncome() {
   </div>`;
 
   const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('detailed','list-ul','Detailed')}${vtInc('excel','table','Excel')}</div><button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('excel','table','Excel')}</div><button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
 
   let entries = [...state.income];
   if (incMonth!=='all')   entries=entries.filter(e=>monthKey(e.date)===incMonth);
@@ -3287,7 +3291,7 @@ function renderExpenses() {
     </div>
   </div>`;
   const vtExp = (m,icon,label) => `<button class="vtb ${expViewMode===m?'active':''}" title="${label}" onclick="setExpViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('detailed','list-ul','Detailed')}${vtExp('excel','table','Excel')}</div></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('excel','table','Excel')}</div></div>`;
 
   let entries = [...state.expenses];
   if (expMonth!=='all')    entries=entries.filter(e=>monthKey(e.date)===expMonth);
@@ -5035,7 +5039,11 @@ async function init() {
 }
 
 // ── Firebase Authentication ─────────────────────────────────────
+const SEEN_LANDING_KEY = 'bm_seen_landing';
+
 function showLoginScreen() {
+  // First-time visitor → show the landing page instead of the bare login form
+  if (!localStorage.getItem(SEEN_LANDING_KEY)) { showLanding(); return; }
   const ls = document.getElementById('loginScreen');
   if (ls) ls.classList.remove('hidden');
   // Pre-fill config if already set
@@ -5043,6 +5051,33 @@ function showLoginScreen() {
   const k = document.getElementById('loginApiKey');
   if (u && fbUrl) u.value = fbUrl;
   if (k && fbApiKey) k.value = fbApiKey;
+}
+
+function showLanding() {
+  const l = document.getElementById('landingScreen');
+  if (l) l.classList.remove('hidden');
+}
+function hideLanding() {
+  const l = document.getElementById('landingScreen');
+  if (l) l.classList.add('hidden');
+}
+// From the landing, go to the login form in the requested mode (signin/signup)
+function enterLoginFromLanding(mode) {
+  localStorage.setItem(SEEN_LANDING_KEY, '1');
+  hideLanding();
+  const ls = document.getElementById('loginScreen');
+  if (ls) ls.classList.remove('hidden');
+  if (mode === 'signup' && _loginMode !== 'signup') toggleLoginMode();
+  if (mode === 'signin' && _loginMode !== 'signin') toggleLoginMode();
+  const u = document.getElementById('loginFbUrl');
+  const k = document.getElementById('loginApiKey');
+  if (u && fbUrl) u.value = fbUrl;
+  if (k && fbApiKey) k.value = fbApiKey;
+}
+// Link on the login form back to the landing
+function backToLanding() {
+  hideLoginScreen();
+  showLanding();
 }
 
 function hideLoginScreen() {

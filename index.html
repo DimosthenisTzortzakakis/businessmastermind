@@ -36,6 +36,71 @@
     <div class="glass-blob blob-4"></div>
   </div>
 
+  <!-- Landing / First-run Screen -->
+  <div id="landingScreen" class="landing-screen hidden">
+    <header class="landing-nav">
+      <div class="landing-brand">
+        <div class="landing-brand-logo">B</div>
+        <span class="landing-brand-name">Mastermind</span>
+      </div>
+      <button class="landing-signin-link" onclick="enterLoginFromLanding('signin')">Sign in</button>
+    </header>
+
+    <section class="landing-hero">
+      <h1 class="landing-h1">Every euro, in focus.</h1>
+      <p class="landing-sub">Income, expenses, VAT and clients — logged in seconds and synced across your phone and computer. Built for freelancers and small agencies, not accountants.</p>
+      <div class="landing-cta-row">
+        <button class="landing-cta" onclick="enterLoginFromLanding('signup')">Get started — it's free</button>
+        <button class="landing-cta-ghost" onclick="enterLoginFromLanding('signin')">I already have an account</button>
+      </div>
+    </section>
+
+    <section class="landing-features">
+      <div class="landing-feature">
+        <div class="lf-icon" style="color:var(--green)"><i class="fa-solid fa-arrow-trend-up"></i></div>
+        <div class="lf-title">Income &amp; expenses per client</div>
+        <div class="lf-text">Log every payment and cost in seconds, organized by client and sub-client. A fast grid for the days you enter a lot at once.</div>
+      </div>
+      <div class="landing-feature">
+        <div class="lf-icon" style="color:var(--blue)"><i class="fa-solid fa-receipt"></i></div>
+        <div class="lf-title">Greek VAT, done for you</div>
+        <div class="lf-text">Collected, deductible and net VAT payable calculated automatically on every invoice — no spreadsheets.</div>
+      </div>
+      <div class="landing-feature">
+        <div class="lf-icon" style="color:var(--accent-hover)"><i class="fa-solid fa-rotate"></i></div>
+        <div class="lf-title">Monthly on autopilot</div>
+        <div class="lf-text">Recurring income and expenses are added for each new month by themselves. Change a single month or the whole series.</div>
+      </div>
+      <div class="landing-feature">
+        <div class="lf-icon" style="color:var(--amber)"><i class="fa-solid fa-cloud"></i></div>
+        <div class="lf-title">One source of truth</div>
+        <div class="lf-text">The same data on every device, always in sync. Start on your computer, finish on your phone.</div>
+      </div>
+      <div class="landing-feature">
+        <div class="lf-icon" style="color:var(--green)"><i class="fa-solid fa-file-excel"></i></div>
+        <div class="lf-title">Reports your accountant will love</div>
+        <div class="lf-text">Clean Excel and PDF exports in one tap — per client, per month, or everything.</div>
+      </div>
+      <div class="landing-feature">
+        <div class="lf-icon" style="color:var(--red)"><i class="fa-solid fa-gauge-high"></i></div>
+        <div class="lf-title">Profit at a glance</div>
+        <div class="lf-text">Collected, pending, expenses and net profit for any month — and the statistics behind them.</div>
+      </div>
+    </section>
+
+    <section class="landing-steps">
+      <div class="landing-steps-title">Up and running in three steps</div>
+      <div class="landing-step"><span class="ls-num">1</span><div><div class="ls-h">Add your clients</div><div class="ls-t">Direct clients or agencies with sub-clients — each with its own colour.</div></div></div>
+      <div class="landing-step"><span class="ls-num">2</span><div><div class="ls-h">Log income &amp; expenses</div><div class="ls-t">Use the quick grid or add entries one by one. Mark them Paid or Pending.</div></div></div>
+      <div class="landing-step"><span class="ls-num">3</span><div><div class="ls-h">See profit, VAT &amp; reports</div><div class="ls-t">The dashboard and reports do the maths. Export whenever you need.</div></div></div>
+    </section>
+
+    <section class="landing-final">
+      <h2 class="landing-final-h">Ready when you are.</h2>
+      <button class="landing-cta" onclick="enterLoginFromLanding('signup')">Create your free account</button>
+    </section>
+  </div>
+
   <!-- Login Screen -->
   <div id="loginScreen" class="login-screen hidden">
     <div class="login-glass">
@@ -61,6 +126,7 @@
         <span id="loginToggleText">Don't have an account?</span>
         <button class="login-link" onclick="toggleLoginMode()" id="loginToggleBtn">Sign Up</button>
       </div>
+      <button class="login-whatis" onclick="backToLanding()">What is Mastermind?</button>
       <div class="login-setup" id="loginSetup">
         <details>
           <summary style="cursor:pointer;font-size:12px;color:var(--text-faint);margin-top:16px">⚙ Firebase Setup</summary>
@@ -165,10 +231,10 @@
       <div id="incomeList"></div>
       <div class="bulk-action-bar" id="incomeBulkBar" style="display:none">
         <span class="bulk-count" id="bulkSelCount">0 selected</span>
-        <button class="bulk-btn bulk-paid" onclick="bulkMarkIncome('Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>
-        <button class="bulk-btn bulk-pending" onclick="bulkMarkIncome('Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
-        <button class="bulk-btn bulk-del" onclick="bulkDeleteIncome()"><i class="fa-solid fa-trash"></i> Delete</button>
-        <button class="bulk-btn bulk-cancel" onclick="exitIncBulkMode()"><i class="fa-solid fa-xmark"></i></button>
+        <button class="bulk-btn bulk-paid" onclick="bulkMarkIncome('Paid')"><i class="fa-solid fa-circle-check"></i> <span class="bulk-btn-label">Paid</span></button>
+        <button class="bulk-btn bulk-pending" onclick="bulkMarkIncome('Pending')"><i class="fa-solid fa-clock"></i> <span class="bulk-btn-label">Pending</span></button>
+        <button class="bulk-btn bulk-del" onclick="bulkDeleteIncome()"><i class="fa-solid fa-trash"></i> <span class="bulk-btn-label">Delete</span></button>
+        <button class="bulk-btn bulk-cancel" onclick="exitIncBulkMode()" title="Done" aria-label="Done"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <!-- Global floating undo bar — injected by JS, shown after any undoable action -->
       <div id="undoFloatBar"></div>
@@ -217,11 +283,8 @@
     <!-- MONTHLY -->
     <section class="view hidden" id="view-monthly">
       <div class="monthly-intro">
-        <div class="monthly-intro-row">
-          <div class="section-title" style="margin:0">Monthly Items</div>
-          <button class="btn-generate-monthly" onclick="generateRecurring()"><i class="fa-solid fa-rotate"></i> Generate this month</button>
-        </div>
-        <p class="monthly-help">Every recurring income &amp; expense, one row each. Expand a row to see each month, edit a single month, or change/stop/delete the whole series.</p>
+        <div class="section-title" style="margin:0">Monthly Items</div>
+        <p class="monthly-help">Your recurring income &amp; expenses. Each month is added automatically. Expand a row to see every month, edit a single month, or change/stop/delete the whole series.</p>
       </div>
       <div class="monthly-list" id="monthlyList"></div>
     </section>
