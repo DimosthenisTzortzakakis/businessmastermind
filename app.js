@@ -289,6 +289,7 @@ async function loadData() {
   state.clients.forEach(c => {
     if (!c.paymentType) c.paymentType = 'invoice';
     if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
+    if (!Array.isArray(c.subclients)) c.subclients = []; // backfill so edit never crashes
   });
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
@@ -835,7 +836,7 @@ function openEditClient(clientId) {
   document.getElementById('editClientName').value  = c.name;
   editClientType       = c.type;
   editClientColor      = c.color;
-  editClientSubclients = [...c.subclients];
+  editClientSubclients = [...(c.subclients || [])]; // guard: old/direct clients may lack the array
   document.getElementById('editTypeDirect').classList.toggle('active', c.type==='Direct');
   document.getElementById('editTypeAgency').classList.toggle('active', c.type==='Agency');
   const scGroup = document.getElementById('editSubclientGroup');
@@ -3419,7 +3420,7 @@ function renderClients() {
       </button>
       <div class="client-card-avatar" style="${avatarStyle}">${avatarInner}</div>
       <div class="client-card-name">${c.name}</div>
-      <div class="client-card-type">${c.type==='Agency'?`Agency · ${c.subclients.length} sub-clients`:'Direct Client'} · <span class="client-pay-badge ${c.paymentType||'invoice'}">${c.paymentType==='cash'?'Cash':'Invoice'}</span></div>
+      <div class="client-card-type">${c.type==='Agency'?`Agency · ${(c.subclients||[]).length} sub-clients`:'Direct Client'} · <span class="client-pay-badge ${c.paymentType||'invoice'}">${c.paymentType==='cash'?'Cash':'Invoice'}</span></div>
       <div class="client-card-stats">
         <div class="client-stat"><span class="client-stat-label">Total Earned</span><span class="client-stat-val green">${fmt(total)}</span></div>
         <div class="client-stat"><span class="client-stat-label">Jobs</span><span class="client-stat-val">${ci.length}</span></div>

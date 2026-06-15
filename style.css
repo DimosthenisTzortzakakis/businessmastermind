@@ -2843,6 +2843,34 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   transform: translateY(-1px);
 }
 
+/* ── Quick Entry on mobile: zoom out + always-reachable Save ── */
+@media (max-width: 768px) {
+  /* Sticky Save so you never have to scroll to the bottom of a tall grid */
+  .qe-save-grid-btn {
+    position: sticky;
+    bottom: calc(var(--bottom-nav-h) + 8px);
+    z-index: 60;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    margin-bottom: 4px;
+  }
+  /* Breathing room so the sticky button never hides the last rows */
+  #view-quickentry { padding-bottom: calc(var(--bottom-nav-h) + 70px); }
+
+  /* Zoom out the grid so more fits without horizontal scrolling */
+  .qe-spreadsheet { font-size: 11px; min-width: 0; }
+  .qe-spreadsheet thead th { padding: 5px 4px; font-size: 9px; letter-spacing: .2px; }
+  .qe-th-day, .qe-td-day { width: 24px; padding: 4px 2px; font-size: 10px; }
+  .qe-th-client { min-width: 56px; }
+  .qe-th-total { min-width: 50px; }
+  .qe-spreadsheet td { padding: 2px 2px; }
+  .qe-sp-inp { font-size: 11px; padding: 5px 2px; }
+  .qe-client-total { font-size: 10px; padding: 4px 3px; }
+  .qe-client-svc-inp { font-size: 9px; padding: 2px 3px; }
+  .qe-sh { font-size: 9px; padding: 3px 3px; }
+  .qe-tf-label, .qe-tf-grand { font-size: 10px; }
+  .qe-spreadsheet-wrapper { border-radius: 10px; }
+}
+
 /* ── Expense QE Grid slots ── */
 .qe-exp-day-td { padding: 4px 6px; vertical-align: middle; }
 .qe-exp-slots { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 2px 0; }
