@@ -5176,6 +5176,11 @@ async function doLogin() {
     localStorage.setItem(AUTH_EMAIL,   authEmail);
     localStorage.setItem(AUTH_UID,     authUid);
     localStorage.setItem(AUTH_EXPIRY,  String(authExpiry));
+    // Point the sync blob at THIS user before init/startAutoSync runs, otherwise
+    // it would read a previous user's blob with the new token → 403 → signout loop
+    syncBlobId = authUid;
+    localStorage.setItem(BLOB_KEY, authUid);
+    _authPromptShown = false;
     hideLoginScreen();
     onAuthReady();
   } catch (e) {
@@ -5229,6 +5234,11 @@ async function finishFirebaseLogin(user) {
   localStorage.setItem(AUTH_EMAIL,   authEmail);
   localStorage.setItem(AUTH_UID,     authUid);
   localStorage.setItem(AUTH_EXPIRY,  String(authExpiry));
+  // Point the sync blob at THIS user before init/startAutoSync runs, otherwise
+  // it would read a previous user's blob with the new token → 403 → signout loop
+  syncBlobId = authUid;
+  localStorage.setItem(BLOB_KEY, authUid);
+  _authPromptShown = false;
   hideLoginScreen();
   scheduleTokenRefresh();
   onAuthReady();
@@ -5299,15 +5309,6 @@ function updateSidebarUser() {
 const LAST_UID_KEY = 'bm_last_uid';
 async function adoptUserBlob() {
   if (!authUid) return;
-  // A different account logged in on this browser: local data belongs to the
-  // previous user — wipe it instead of seeding it into the new account's blob
-  const lastUid = localStorage.getItem(LAST_UID_KEY) || '';
-  if (lastUid && lastUid !== authUid) {
-    state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{} };
-    await idbSet(STORAGE_KEY, state);
-    try { navigate(currentView); } catch(_) {}
-  }
-  localStorage.setItem(LAST_UID_KEY, authUid);
   if (syncBlobId !== authUid) {
     syncBlobId = authUid;
     localStorage.setItem(BLOB_KEY, syncBlobId);
@@ -5328,8 +5329,19 @@ async function adoptUserBlob() {
   } catch(_) {}
 }
 
-function onAuthReady() {
+async function onAuthReady() {
   updateSidebarUser();
+  // If a DIFFERENT account than last time signed in on this browser, clear the
+  // previous user's local data BEFORE init runs — otherwise init's auto-sync /
+  // recurring-generation could push their data into this account's blob.
+  if (authUid) {
+    const lastUid = localStorage.getItem(LAST_UID_KEY) || '';
+    if (lastUid && lastUid !== authUid) {
+      state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{} };
+      try { await idbSet(STORAGE_KEY, state); } catch(_) {}
+    }
+    localStorage.setItem(LAST_UID_KEY, authUid);
+  }
   init().then(() => adoptUserBlob()).catch(err => {
     console.error('App init failed:', err);
     try { navigate('dashboard'); } catch(_) {}
