@@ -2737,10 +2737,23 @@ function animateKpiValues(next) {
 }
 
 // ── RENDER: Dashboard ──────────────────────────────────────────
+// dashMonth can be 'all', a year 'YYYY', or a month 'YYYY-MM'
+function isDashYear()  { return /^\d{4}$/.test(dashMonth); }
+function dashMatch(dateStr) {
+  if (dashMonth === 'all') return true;
+  if (isDashYear()) return (dateStr||'').slice(0,4) === dashMonth;
+  return monthKey(dateStr) === dashMonth;
+}
+function dashPeriodLabel() {
+  if (dashMonth === 'all') return 'All Time';
+  if (isDashYear()) return dashMonth;
+  return monthLabel(dashMonth);
+}
+
 function renderDashboard() {
   renderMonthPills();
-  const inc = dashMonth==='all' ? state.income   : state.income.filter(e=>monthKey(e.date)===dashMonth);
-  const exp = dashMonth==='all' ? state.expenses : state.expenses.filter(e=>monthKey(e.date)===dashMonth);
+  const inc = state.income.filter(e=>dashMatch(e.date));
+  const exp = state.expenses.filter(e=>dashMatch(e.date));
 
   // KPIs
   const collected = inc.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
@@ -2753,6 +2766,11 @@ function renderDashboard() {
     <div class="kpi-card red kpi-clickable" onclick="navigate('expenses')" title="Go to Expenses"><div class="kpi-icon"><i class="fa-solid fa-arrow-trend-down"></i></div><div class="kpi-label">Expenses</div><div class="kpi-value" data-kpi="expenses">${fmt(totalExp)}</div></div>
     <div class="kpi-card blue"><div class="kpi-icon"><i class="fa-solid fa-sack-dollar"></i></div><div class="kpi-label">Net Profit</div><div class="kpi-value" data-kpi="profit" style="color:${netProfit>=0?'var(--green)':'var(--red)'}">${fmt(netProfit)}</div></div>`;
   animateKpiValues({ collected, pending, expenses: totalExp, profit: netProfit });
+
+  // Small caption: total income = collected + pending (everything invoiced for the period)
+  const totalIncome = collected + pending;
+  const ktl = document.getElementById('kpiTotalLine');
+  if (ktl) ktl.innerHTML = `<i class="fa-solid fa-coins"></i> <span>Total income for ${dashPeriodLabel()} (collected + pending):</span> <strong>${fmt(totalIncome)}</strong>`;
 
   // Recurring prompt — count missing recurring entries for current month
   const curMonth = todayVal().slice(0,7);
@@ -2830,9 +2848,16 @@ function renderDashboard() {
 function renderMonthPills() {
   const months = allMonths();
   const cur    = todayVal().slice(0,7);
+  if (!months.includes(cur)) months.unshift(cur);
+  months.sort((a,b)=>b.localeCompare(a));
+  const years = [...new Set(months.map(m=>m.slice(0,4)))].sort((a,b)=>b.localeCompare(a));
   let html = `<button class="month-pill ${dashMonth==='all'?'active':''}" onclick="setDashMonth('all')">All Time</button>`;
-  months.forEach(m=>{ html+=`<button class="month-pill ${dashMonth===m?'active':''}" onclick="setDashMonth('${m}')">${monthLabel(m)}</button>`; });
-  if (!months.includes(cur)) html+=`<button class="month-pill ${dashMonth===cur?'active':''}" onclick="setDashMonth('${cur}')">${monthLabel(cur)}</button>`;
+  // Year pills — pick a whole year for a yearly summary
+  years.forEach(y=>{ html+=`<button class="month-pill month-pill-year ${dashMonth===y?'active':''}" onclick="setDashMonth('${y}')"><i class="fa-solid fa-calendar"></i> ${y}</button>`; });
+  // Month pills — only the months of the selected year (keeps the row short);
+  // when 'all' or a single month is selected, show every month.
+  const monthsToShow = isDashYear() ? months.filter(m=>m.slice(0,4)===dashMonth) : months;
+  monthsToShow.forEach(m=>{ html+=`<button class="month-pill ${dashMonth===m?'active':''}" onclick="setDashMonth('${m}')">${monthLabel(m)}</button>`; });
   document.getElementById('monthPills').innerHTML = html;
 }
 
@@ -2853,10 +2878,11 @@ function renderStatistics(filteredInc) {
     if (dashMonth === 'all') {
       badge.textContent = 'All Time';
       badge.className = 'stats-period-badge period-all';
+    } else if (isDashYear()) {
+      badge.textContent = 'Year · ' + dashMonth;
+      badge.className = 'stats-period-badge period-month';
     } else {
       const cur = todayVal().slice(0,7);
-      const yr  = dashMonth.slice(0,4);
-      const curYr = cur.slice(0,4);
       badge.textContent = dashMonth === cur ? 'This Month · ' + monthLabel(dashMonth) : monthLabel(dashMonth);
       badge.className = 'stats-period-badge period-month';
     }
@@ -2944,12 +2970,12 @@ function renderStatistics(filteredInc) {
   }
 
   // Expenses by category doughnut — respects the dashboard month filter
-  const periodSubLabel = dashMonth === 'all' ? 'All Time' : monthLabel(dashMonth);
+  const periodSubLabel = dashPeriodLabel();
   const cbcp = document.getElementById('chartByClientPeriod');
   const cecp = document.getElementById('chartExpCatPeriod');
   if (cbcp) cbcp.textContent = periodSubLabel;
   if (cecp) cecp.textContent = periodSubLabel;
-  const statExpenses = dashMonth === 'all' ? state.expenses : state.expenses.filter(e => monthKey(e.date) === dashMonth);
+  const statExpenses = state.expenses.filter(e => dashMatch(e.date));
   const byCatExp = {};
   statExpenses.forEach(e => { byCatExp[e.category] = (byCatExp[e.category]||0) + e.amount; });
   const catEntries = Object.entries(byCatExp).sort((a,b) => b[1]-a[1]);
@@ -2984,7 +3010,7 @@ function renderStatistics(filteredInc) {
   const maxCl = topClients[0]?.[1]||1;
   const maxSv = topSvc[0]?.[1]||1;
   const maxMo = topMo[0]?.[1]||1;
-  const periodLabel = dashMonth === 'all' ? 'All Time' : monthLabel(dashMonth);
+  const periodLabel = dashPeriodLabel();
   document.getElementById('statsTablesRow').innerHTML = `
     <div class="stats-table-card">
       <div class="stats-table-title"><i class="fa-solid fa-trophy"></i> Top Clients <span class="stats-period-sub">${periodLabel}</span></div>
@@ -3179,8 +3205,8 @@ function renderIncome() {
         const grpIds = grp.map(e=>e.id);
         const allChecked = grpIds.every(id=>incSelectedIds.has(id));
         const someChecked = !allChecked && grpIds.some(id=>incSelectedIds.has(id));
-        html+=`<div class="byclient-group ${incBulkMode?'expanded':''}" data-cid="${cid}">
-          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}" onclick="${incBulkMode?`selectClientGroup('${cid}',event)`:`toggleClientGroup('${cid}')`}">
+        html+=`<div class="byclient-group" data-cid="${cid}">
+          <div class="byclient-header" style="border-left:3px solid ${c?.color||'#888'}" onclick="toggleClientGroup('${cid}')">
             ${incBulkMode?`<input type="checkbox" class="bulk-cb bc-select-all-cb" title="Select all for ${c?.name||'client'}" ${allChecked?'checked':''} onclick="selectClientGroup('${cid}',event)" style="width:20px;height:20px;flex-shrink:0;accent-color:var(--accent)">`:'' }
             <div class="byclient-name">${av}<span>${c?.name||'Unknown'}</span></div>
             <div class="bc-meta">
@@ -3192,7 +3218,7 @@ function renderIncome() {
               <span class="byclient-paid">${fmt(paid)}</span>
               ${pend>0?`<span class="byclient-pending">+${fmt(pend)} pend.</span>`:''}
             </div>
-            ${incBulkMode?'':`<i class="fa-solid fa-chevron-right bc-chevron"></i>`}
+            <i class="fa-solid fa-chevron-right bc-chevron"></i>
           </div>
           <div class="byclient-entries">${entriesHtml}</div>
         </div>`;
