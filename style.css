@@ -134,8 +134,9 @@ input[type="number"] { -moz-appearance: textfield; }
   --bg: #f5f3ef;
   --bg-card: #ffffff;
   --bg-card2: #f0ede7;
-  --border: rgba(20,20,40,0.12);
-  --text: #1c1b22; --text-muted: #5c5a6b; --text-faint: #807e90;
+  --border: rgba(20,20,40,0.14);
+  /* Strong, near-black text for high contrast on the light theme */
+  --text: #14141b; --text-muted: #38363f; --text-faint: #55525f;
   --sidebar-bg: rgba(255,255,255,0.92); --sidebar-border: rgba(20,20,40,0.1);
   --sidebar-item-hover: rgba(20,20,40,0.05);
   --surface-solid: #ffffff; --topbar-bg: rgba(245,243,239,0.85);
@@ -3713,3 +3714,32 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .wheel-cancel:hover { color: var(--text); }
 .wheel-done { background: var(--accent); color: #fff; border: none; }
 .wheel-done:hover { background: var(--accent-hover); }
+
+/* ============================================================
+   LIGHT THEME — contrast fixes for surfaces built for dark bg
+   (black/strong text everywhere; coloured numbers stay coloured)
+   ============================================================ */
+/* Service inputs under client headers used a dark box + white border */
+[data-theme="light"] .qe-client-svc-inp {
+  background: #fff;
+  border-color: rgba(20,20,40,0.18);
+  color: var(--text);
+}
+[data-theme="light"] .qe-client-svc-inp:focus {
+  background: #fff;
+  border-color: var(--accent);
+  color: var(--text);
+}
+/* Make grid lines visible on white (were white-translucent) */
+[data-theme="light"] .qe-spreadsheet td { border-bottom-color: rgba(20,20,40,0.07); }
+[data-theme="light"] .qe-td-total,
+[data-theme="light"] .qe-tf-grand { border-left-color: rgba(20,20,40,0.12) !important; }
+/* Faint number-cell fields get a subtle visible field on white */
+[data-theme="light"] .qe-sp-inp { background: rgba(20,20,40,0.035); }
+[data-theme="light"] .qe-sp-inp:focus { background: #fff; }
+/* Placeholders (incl. the "—" empty-cell marks) readable but clearly secondary */
+[data-theme="light"] ::placeholder { color: #7c7a88 !important; opacity: 1; }
+[data-theme="light"] .qe-sp-inp::placeholder { color: #9b99a6 !important; }
+/* Client name group-headers: ensure strong dark text (keeps coloured
+   sub-headers €/unit & Total intact since those carry their own colour) */
+[data-theme="light"] .qe-th-client { color: var(--text); }

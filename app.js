@@ -3031,6 +3031,10 @@ function setDashMonth(m) { dashMonth=m; saveUIState(); renderDashboard(); }
 
 // ── Statistics ─────────────────────────────────────────────────
 function renderStatistics(filteredInc) {
+  // Theme-aware chart text/grid colours (light theme needs dark, readable text)
+  const _light = (typeof currentTheme === 'function') && currentTheme() === 'light';
+  const chartTxt  = _light ? '#44424d' : '#94a3b8';
+  const chartGrid = _light ? 'rgba(20,20,40,0.08)' : 'rgba(255,255,255,0.04)';
   // Update period badge
   const badge = document.getElementById('statsPeriodBadge');
   if (badge) {
@@ -3095,7 +3099,7 @@ function renderStatistics(filteredInc) {
           borderWidth:2, borderColor:'rgba(255,255,255,0.08)' }]
       },
       options:{ responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8',font:{size:11,family:'Inter'},padding:8,boxWidth:12 } },
+        plugins:{ legend:{ position:'right', labels:{ color:chartTxt,font:{size:11,family:'Inter'},padding:8,boxWidth:12 } },
           tooltip:{ callbacks:{ label:ctx=>` ${ctx.label}: ${fmt(ctx.raw)}` } } } }
     });
   } else if (pieCtx) {
@@ -3117,10 +3121,10 @@ function renderStatistics(filteredInc) {
       },
       options:{ responsive:true, maintainAspectRatio:false,
         scales:{
-          x:{ ticks:{color:'#94a3b8',font:{size:10}}, grid:{color:'rgba(255,255,255,0.04)'} },
-          y:{ ticks:{color:'#94a3b8',font:{size:10},callback:v=>'€'+(v>=1000?(v/1000).toFixed(1)+'k':v)}, grid:{color:'rgba(255,255,255,0.04)'} }
+          x:{ ticks:{color:chartTxt,font:{size:10}}, grid:{color:chartGrid} },
+          y:{ ticks:{color:chartTxt,font:{size:10},callback:v=>'€'+(v>=1000?(v/1000).toFixed(1)+'k':v)}, grid:{color:chartGrid} }
         },
-        plugins:{ legend:{labels:{color:'#94a3b8',font:{size:11,family:'Inter'},boxWidth:12}},
+        plugins:{ legend:{labels:{color:chartTxt,font:{size:11,family:'Inter'},boxWidth:12}},
           tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${fmt(ctx.raw)}`}} }
       }
     });
@@ -3150,7 +3154,7 @@ function renderStatistics(filteredInc) {
           borderWidth:2, borderColor:'rgba(255,255,255,0.08)' }]
       },
       options:{ responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{ position:'right', labels:{ color:'#94a3b8',font:{size:11,family:'Inter'},padding:8,boxWidth:12 } },
+        plugins:{ legend:{ position:'right', labels:{ color:chartTxt,font:{size:11,family:'Inter'},padding:8,boxWidth:12 } },
           tooltip:{ callbacks:{ label:ctx=>` ${ctx.label}: ${fmt(ctx.raw)}` } } } }
     });
   } else if (expCatCtx) {
