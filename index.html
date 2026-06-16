@@ -507,7 +507,12 @@
           <button class="date-mode-btn active" id="incDateModeExact" onclick="setIncomeDateMode('exact')"><i class="fa-solid fa-calendar-day"></i> Exact Date</button>
           <button class="date-mode-btn" id="incDateModeMonth" onclick="setIncomeDateMode('month')"><i class="fa-solid fa-calendar"></i> Month Only</button>
         </div>
-        <input type="date" class="form-input" id="incomeDate" />
+        <button type="button" class="date-display" id="incomeDateDisplay" onclick="openIncomeDateWheel()">
+          <i class="fa-solid fa-calendar-day dd-cal"></i>
+          <span class="dd-text">Today</span>
+          <i class="fa-solid fa-chevron-down dd-chev"></i>
+        </button>
+        <input type="hidden" id="incomeDate" />
       </div>
       <div class="form-group">
         <label class="form-label">Monthly Income?</label>
@@ -612,7 +617,12 @@
           <button class="date-mode-btn active" id="expDateModeExact" onclick="setExpDateMode('exact')"><i class="fa-solid fa-calendar-day"></i> Exact Date</button>
           <button class="date-mode-btn" id="expDateModeMonth" onclick="setExpDateMode('month')"><i class="fa-solid fa-calendar"></i> Month Only</button>
         </div>
-        <input type="date" class="form-input" id="expenseDate" />
+        <button type="button" class="date-display" id="expenseDateDisplay" onclick="openExpenseDateWheel()">
+          <i class="fa-solid fa-calendar-day dd-cal"></i>
+          <span class="dd-text">Today</span>
+          <i class="fa-solid fa-chevron-down dd-chev"></i>
+        </button>
+        <input type="hidden" id="expenseDate" />
       </div>
     </div>
     <div class="sheet-footer">
@@ -721,6 +731,11 @@
       </div>
       <button class="btn-save" onclick="saveNewClient()"><i class="fa-solid fa-check"></i> Add Client</button>
     </div>
+  </div>
+
+  <!-- iOS-style rolling date picker -->
+  <div class="date-wheel-overlay hidden" id="dateWheelOverlay" onclick="if(event.target===this)closeDateWheel()">
+    <div class="date-wheel-sheet" id="dateWheelSheet"></div>
   </div>
 
   <button class="fab" onclick="openAddPicker()"><i class="fa-solid fa-plus"></i></button>

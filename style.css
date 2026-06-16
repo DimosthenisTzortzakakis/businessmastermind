@@ -3636,3 +3636,80 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .theme-swatch-dot { width: 10px; height: 10px; border-radius: 50%; }
 .theme-opt-name { flex: 1; }
 .theme-opt-check { color: var(--accent); font-size: 12px; }
+
+/* ============================================================
+   DATE DISPLAY FIELD + iOS-STYLE WHEEL PICKER (themed)
+   ============================================================ */
+.date-display {
+  width: 100%;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-card2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 13px 16px; font-size: 15px; font-family: inherit;
+  cursor: pointer; transition: var(--transition);
+}
+.date-display:hover { border-color: var(--accent); }
+.date-display .dd-cal { color: var(--accent); font-size: 14px; }
+.date-display .dd-text { flex: 1; text-align: left; font-weight: 600; }
+.date-display .dd-chev { color: var(--text-muted); font-size: 12px; }
+
+.date-wheel-overlay {
+  position: fixed; inset: 0; z-index: 4000;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,0.5);
+  opacity: 0; transition: opacity 0.2s;
+}
+.date-wheel-overlay.open { opacity: 1; }
+.date-wheel-sheet {
+  background: var(--surface-solid);
+  width: 100%; max-width: 440px;
+  border-radius: 22px 22px 0 0;
+  padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -12px 44px rgba(0,0,0,0.55);
+  transform: translateY(24px); transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
+}
+.date-wheel-overlay.open .date-wheel-sheet { transform: translateY(0); }
+@media (min-width: 560px) {
+  .date-wheel-overlay { align-items: center; }
+  .date-wheel-sheet { border-radius: 22px; }
+}
+.wheel-title {
+  text-align: center; font-weight: 700; font-size: 15px;
+  color: var(--text); margin-bottom: 12px;
+}
+.wheel-cols { position: relative; display: flex; gap: 6px; height: 200px; }
+.wheel-col {
+  flex: 1; height: 200px; overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  position: relative; z-index: 2;
+}
+.wheel-col::-webkit-scrollbar { display: none; }
+.wheel-pad { height: 80px; }
+.wheel-item {
+  height: 40px; line-height: 40px; text-align: center;
+  scroll-snap-align: center;
+  color: var(--text-muted); font-size: 18px; font-weight: 500;
+  cursor: pointer; transition: color 0.15s, transform 0.15s;
+}
+.wheel-item.sel { color: var(--text); font-weight: 800; transform: scale(1.06); }
+.wheel-band {
+  position: absolute; top: 80px; left: 0; right: 0; height: 40px;
+  border-radius: 10px; z-index: 1;
+  background: var(--accent-light);
+  border-top: 1.5px solid var(--accent);
+  border-bottom: 1.5px solid var(--accent);
+  pointer-events: none;
+}
+.wheel-actions { display: flex; gap: 10px; margin-top: 18px; }
+.wheel-btn {
+  flex: 1; padding: 13px; border-radius: var(--radius-sm);
+  font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit;
+  transition: var(--transition);
+}
+.wheel-cancel { background: var(--bg-card2); color: var(--text-muted); border: 1px solid var(--border); }
+.wheel-cancel:hover { color: var(--text); }
+.wheel-done { background: var(--accent); color: #fff; border: none; }
+.wheel-done:hover { background: var(--accent-hover); }

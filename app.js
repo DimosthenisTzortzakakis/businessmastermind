@@ -1189,6 +1189,7 @@ function resetIncomeForm() {
   if (upEl)  upEl.value  = '';
   document.getElementById('incAmountGroup').classList.remove('hidden');
 
+  document.getElementById('incomeDate').value = todayVal(); // fresh add defaults to today
   setIncomeDateMode('exact');
   updateVATPreview();
   editingEntryId = null; editingEntryType = null;
@@ -1198,15 +1199,22 @@ function resetIncomeForm() {
   if (saveEl)  saveEl.innerHTML = '<i class="fa-solid fa-check"></i> Save Income Entry';
 }
 
+// Reformat a stored date value for a given mode:
+//   exact → 'YYYY-MM-DD' (append -01 if only a month was stored)
+//   month → 'YYYY-MM'
+function reformatDateVal(v, mode) {
+  if (!v) v = todayVal();
+  if (mode === 'month') return v.slice(0, 7);
+  return v.length === 7 ? v + '-01' : v.slice(0, 10);
+}
+
 function setIncomeDateMode(mode) {
   incomeDateMode = mode;
   document.getElementById('incDateModeExact').classList.toggle('active', mode==='exact');
   document.getElementById('incDateModeMonth').classList.toggle('active', mode==='month');
   const inp = document.getElementById('incomeDate');
-  const val = inp.value;
-  inp.type = mode==='month' ? 'month' : 'date';
-  if (mode==='month') inp.value = todayVal().slice(0,7);
-  else inp.value = todayVal();
+  inp.value = reformatDateVal(inp.value, mode);
+  updateIncomeDateDisplay();
 }
 
 function setExpDateMode(mode) {
@@ -1214,9 +1222,158 @@ function setExpDateMode(mode) {
   document.getElementById('expDateModeExact').classList.toggle('active', mode==='exact');
   document.getElementById('expDateModeMonth').classList.toggle('active', mode==='month');
   const inp = document.getElementById('expenseDate');
-  inp.type = mode==='month' ? 'month' : 'date';
-  if (mode==='month') inp.value = todayVal().slice(0,7);
-  else inp.value = todayVal();
+  inp.value = reformatDateVal(inp.value, mode);
+  updateExpDateDisplay();
+}
+
+// ── Date display fields + iOS-style wheel picker ───────────────
+function fmtDateDisplay(val, mode) {
+  if (!val) return mode === 'month' ? 'Pick a month' : 'Pick a date';
+  const p = val.split('-').map(Number);
+  if (mode === 'month') return MONTH_NAMES[(p[1]||1)-1] + ' ' + p[0];
+  return (p[2]||1) + ' ' + MONTH_NAMES[(p[1]||1)-1] + ' ' + p[0];
+}
+function updateIncomeDateDisplay() {
+  const el = document.getElementById('incomeDateDisplay');
+  if (el) el.querySelector('.dd-text').textContent = fmtDateDisplay(document.getElementById('incomeDate').value, incomeDateMode);
+}
+function updateExpDateDisplay() {
+  const el = document.getElementById('expenseDateDisplay');
+  if (el) el.querySelector('.dd-text').textContent = fmtDateDisplay(document.getElementById('expenseDate').value, expDateMode);
+}
+function openIncomeDateWheel() {
+  openDateWheel(incomeDateMode, document.getElementById('incomeDate').value, val => {
+    document.getElementById('incomeDate').value = val;
+    updateIncomeDateDisplay();
+  });
+}
+function openExpenseDateWheel() {
+  openDateWheel(expDateMode, document.getElementById('expenseDate').value, val => {
+    document.getElementById('expenseDate').value = val;
+    updateExpDateDisplay();
+  });
+}
+
+const WHEEL_ITEM_H = 40;
+let _dateWheel = null; // { mode, y, m(0-11), d, onPick }
+
+function _pad2(n){ return String(n).padStart(2,'0'); }
+function _daysInMon(y,m){ return new Date(y, m+1, 0).getDate(); }
+function _wheelYears(){
+  const w = _dateWheel;
+  const lo = Math.min(2018, w.y);
+  const hi = Math.max(new Date().getFullYear()+2, w.y);
+  const a = []; for (let y=lo; y<=hi; y++) a.push(y);
+  return a;
+}
+
+function openDateWheel(mode, value, onPick) {
+  const t = new Date();
+  let y, m, d;
+  if (value) { const p = value.split('-').map(Number); y=p[0]; m=(p[1]||1)-1; d=p[2]||1; }
+  else { y=t.getFullYear(); m=t.getMonth(); d=t.getDate(); }
+  _dateWheel = { mode, y, m, d, onPick };
+  const ov = document.getElementById('dateWheelOverlay');
+  ov.classList.remove('hidden');
+  renderDateWheel();
+  requestAnimationFrame(()=>ov.classList.add('open'));
+}
+
+function _wheelColHTML(key, items, selIdx) {
+  return `<div class="wheel-col" data-key="${key}">`
+    + `<div class="wheel-pad"></div>`
+    + items.map((it,i)=>`<div class="wheel-item${i===selIdx?' sel':''}" data-idx="${i}">${it}</div>`).join('')
+    + `<div class="wheel-pad"></div></div>`;
+}
+
+function renderDateWheel() {
+  const w = _dateWheel; if (!w) return;
+  const years  = _wheelYears();
+  const months = MONTH_NAMES.map(n=>n.slice(0,3));
+  const dim = _daysInMon(w.y, w.m);
+  if (w.d > dim) w.d = dim;
+
+  let cols = '';
+  if (w.mode === 'exact') {
+    const days = Array.from({length:dim},(_,i)=>i+1);
+    cols += _wheelColHTML('d', days, w.d-1);
+  }
+  cols += _wheelColHTML('m', months, w.m);
+  cols += _wheelColHTML('y', years, years.indexOf(w.y));
+
+  document.getElementById('dateWheelSheet').innerHTML =
+    `<div class="wheel-title">${w.mode==='month'?'Pick a month':'Pick a date'}</div>`
+    + `<div class="wheel-cols">${cols}<div class="wheel-band"></div></div>`
+    + `<div class="wheel-actions">`
+    +   `<button class="wheel-btn wheel-cancel" onclick="closeDateWheel()">Cancel</button>`
+    +   `<button class="wheel-btn wheel-done" onclick="confirmDateWheel()">Done</button>`
+    + `</div>`;
+
+  document.querySelectorAll('#dateWheelSheet .wheel-col').forEach(col => _wireWheelCol(col));
+}
+
+function _wireWheelCol(col) {
+  const sel = col.querySelector('.wheel-item.sel');
+  const selIdx = sel ? parseInt(sel.dataset.idx) : 0;
+  requestAnimationFrame(()=>{ col.scrollTop = selIdx * WHEEL_ITEM_H; });
+  let tmr = null;
+  col.addEventListener('scroll', () => {
+    _markWheelSel(col);
+    clearTimeout(tmr);
+    tmr = setTimeout(()=>_onWheelSettle(col), 100);
+  });
+  col.querySelectorAll('.wheel-item').forEach(it => {
+    it.addEventListener('click', ()=> col.scrollTo({ top: parseInt(it.dataset.idx)*WHEEL_ITEM_H, behavior:'smooth' }));
+  });
+}
+
+function _markWheelSel(col) {
+  const idx = Math.round(col.scrollTop / WHEEL_ITEM_H);
+  col.querySelectorAll('.wheel-item').forEach(it => it.classList.toggle('sel', parseInt(it.dataset.idx)===idx));
+}
+
+function _onWheelSettle(col) {
+  const w = _dateWheel; if (!w) return;
+  const idx = Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H));
+  const snapped = idx * WHEEL_ITEM_H;
+  if (Math.abs(col.scrollTop - snapped) > 1) col.scrollTop = snapped;
+  const key = col.dataset.key;
+  if (key === 'y')      { w.y = _wheelYears()[idx]; _rebuildWheelDays(); }
+  else if (key === 'm') { w.m = idx;                _rebuildWheelDays(); }
+  else if (key === 'd') { w.d = idx + 1; }
+}
+
+function _rebuildWheelDays() {
+  const w = _dateWheel; if (!w || w.mode !== 'exact') return;
+  const dim = _daysInMon(w.y, w.m);
+  const col = document.querySelector('#dateWheelSheet .wheel-col[data-key="d"]');
+  if (!col) return;
+  if (col.querySelectorAll('.wheel-item').length === dim) return; // no change
+  if (w.d > dim) w.d = dim;
+  const days = Array.from({length:dim},(_,i)=>i+1);
+  col.innerHTML = `<div class="wheel-pad"></div>`
+    + days.map((it,i)=>`<div class="wheel-item${i===w.d-1?' sel':''}" data-idx="${i}">${it}</div>`).join('')
+    + `<div class="wheel-pad"></div>`;
+  col.querySelectorAll('.wheel-item').forEach(it => {
+    it.addEventListener('click', ()=> col.scrollTo({ top: parseInt(it.dataset.idx)*WHEEL_ITEM_H, behavior:'smooth' }));
+  });
+  col.scrollTop = (w.d-1) * WHEEL_ITEM_H;
+}
+
+function confirmDateWheel() {
+  const w = _dateWheel; if (!w) return;
+  const val = w.mode === 'month'
+    ? `${w.y}-${_pad2(w.m+1)}`
+    : `${w.y}-${_pad2(w.m+1)}-${_pad2(w.d)}`;
+  const cb = w.onPick;
+  closeDateWheel();
+  if (cb) cb(val);
+}
+
+function closeDateWheel() {
+  const ov = document.getElementById('dateWheelOverlay');
+  if (ov) { ov.classList.remove('open'); setTimeout(()=>ov.classList.add('hidden'), 200); }
+  _dateWheel = null;
 }
 
 function setIncRecurring(v) {
@@ -1660,6 +1817,7 @@ function openEditEntry(type, id) {
     setIncRecurring(e.recurring||false);
     setIncomeDateMode('exact');
     document.getElementById('incomeDate').value = e.date.slice(0,10);
+    updateIncomeDateDisplay();
 
     // Detect split pair — by splitGroupId (new) or by companion entry (legacy)
     const companion = e.splitGroupId
@@ -1705,6 +1863,7 @@ function openEditEntry(type, id) {
     if (e.vatAmount>0) { setExpHasVAT(true); document.getElementById('expenseVAT').value = e.vatAmount.toFixed(2); }
     setExpDateMode('exact');
     document.getElementById('expenseDate').value = e.date.slice(0,10);
+    updateExpDateDisplay();
     document.querySelector('#sheetExpense .sheet-title').textContent = 'Edit Expense';
     document.querySelector('#sheetExpense .btn-save').innerHTML = '<i class="fa-solid fa-check"></i> Save Changes';
     _openSheet('sheetExpense');
@@ -5024,6 +5183,8 @@ async function init() {
   updateServicesDatalist();
   document.getElementById('incomeDate').value  = todayVal();
   document.getElementById('expenseDate').value = todayVal();
+  updateIncomeDateDisplay();
+  updateExpDateDisplay();
 
   document.getElementById('modalOverlay').addEventListener('click', ()=>{
     const cd  = document.getElementById('confirmDialog');
