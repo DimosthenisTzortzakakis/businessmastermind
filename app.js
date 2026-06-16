@@ -4976,6 +4976,45 @@ function importData(ev) {
 }
 
 // ── Init ───────────────────────────────────────────────────────
+// ── Theme switcher ─────────────────────────────────────────────
+const THEMES = [
+  { id:'dark',   name:'Dark',   bg:'#0b0b16', accent:'#6366f1' },
+  { id:'light',  name:'Light',  bg:'#f5f3ef', accent:'#4f46e5' },
+  { id:'brown',  name:'Brown',  bg:'#140f0b', accent:'#c9784f' },
+  { id:'purple', name:'Purple', bg:'#100a1c', accent:'#a855f7' },
+  { id:'teal',   name:'Teal',   bg:'#07171a', accent:'#14b8a6' },
+  { id:'gold',   name:'Gold',   bg:'#0b0b10', accent:'#d4a857' },
+];
+function currentTheme() { return document.documentElement.getAttribute('data-theme') || 'dark'; }
+function applyTheme(id) {
+  if (id === 'dark') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', id);
+  try { localStorage.setItem('biz_theme', id); } catch(e) {}
+  const menu = document.getElementById('themeMenu');
+  if (menu) menu.classList.add('hidden');
+  // Charts bake in colors at creation time — rebuild the dashboard if it's open
+  if (currentView === 'dashboard') renderDashboard();
+}
+function renderThemeMenu() {
+  const menu = document.getElementById('themeMenu');
+  if (!menu) return;
+  const cur = currentTheme();
+  menu.innerHTML = `<div class="theme-menu-title">Theme</div>` + THEMES.map(t => `
+    <button class="theme-opt ${t.id===cur?'active':''}" onclick="applyTheme('${t.id}')">
+      <span class="theme-swatch" style="background:${t.bg}"><span class="theme-swatch-dot" style="background:${t.accent}"></span></span>
+      <span class="theme-opt-name">${t.name}</span>
+      ${t.id===cur?'<i class="fa-solid fa-check theme-opt-check"></i>':''}
+    </button>`).join('');
+}
+function toggleThemeMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('themeMenu');
+  if (!menu) return;
+  const willOpen = menu.classList.contains('hidden');
+  renderThemeMenu();
+  menu.classList.toggle('hidden', !willOpen);
+}
+
 async function init() {
   await loadData();
   // Always start income/expense tabs on current month (override UIState)
@@ -5007,6 +5046,14 @@ async function init() {
   document.addEventListener('click', e=>{
     if (!e.target.closest('.search-wrapper') && !e.target.closest('.search-results-panel')) {
       document.getElementById('searchResultsPanel').classList.add('hidden');
+    }
+  });
+
+  // Close theme menu on outside click
+  document.addEventListener('click', e=>{
+    if (!e.target.closest('#themeMenu') && !e.target.closest('.topbar-theme-btn')) {
+      const tm = document.getElementById('themeMenu');
+      if (tm) tm.classList.add('hidden');
     }
   });
 

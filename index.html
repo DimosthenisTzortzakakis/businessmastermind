@@ -25,6 +25,13 @@
       databaseURL: "https://business-mastermind-scrollwise-default-rtdb.europe-west1.firebasedatabase.app/"
     });
   </script>
+  <script>
+    // Apply saved theme before first paint to avoid a flash of the default theme
+    try {
+      var _t = localStorage.getItem('biz_theme');
+      if (_t && _t !== 'dark') document.documentElement.setAttribute('data-theme', _t);
+    } catch(e) {}
+  </script>
 </head>
 <body>
 
@@ -181,6 +188,8 @@
       <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar"><i class="fa-solid fa-bars"></i></button>
       <h1 class="topbar-title" id="topbarTitle">Dashboard</h1>
       <div class="topbar-right">
+        <button class="topbar-theme-btn" onclick="toggleThemeMenu(event)" title="Change theme" aria-label="Change theme"><i class="fa-solid fa-palette"></i></button>
+        <div class="theme-menu hidden" id="themeMenu"></div>
         <span id="topbarSyncDot" class="topbar-sync-dot cs-idle" onclick="openSyncModal()" title="Sync status"></span>
         <div class="search-wrapper">
           <i class="fa-solid fa-magnifying-glass search-icon"></i>
