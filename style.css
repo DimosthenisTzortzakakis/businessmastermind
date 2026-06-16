@@ -1717,11 +1717,12 @@ a { text-decoration: none; color: inherit; }
 .client-combo-dropdown {
   position: absolute;
   top: calc(100% + 4px); left: 0; right: 0;
-  background: var(--bg-card);
+  /* Solid (opaque) panel — a floating menu must not let the form show through */
+  background: #16161f;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   z-index: 100;
-  box-shadow: var(--shadow);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.7);
   max-height: 220px;
   overflow-y: auto;
 }
@@ -1736,7 +1737,7 @@ a { text-decoration: none; color: inherit; }
   user-select: none;
   -webkit-user-select: none;
 }
-.client-dd-item:hover, .client-dd-item:active { background: var(--bg-card2); }
+.client-dd-item:hover, .client-dd-item:active { background: #26263a; }
 .client-dd-avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
