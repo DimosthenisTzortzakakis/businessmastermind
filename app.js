@@ -441,10 +441,11 @@ function mergeIncomeEntry(le, ce) {
   const leTs = le.updatedAt || le.createdAt || 0;
   const ceTs = ce.updatedAt || ce.createdAt || 0;
   const winner = leTs >= ceTs ? le : ce; // newer object wins for non-status fields
-  // Resolve status independently using its own timestamp (fall back to the
-  // object timestamp for legacy entries without statusUpdatedAt)
-  const leSt = le.statusUpdatedAt || leTs;
-  const ceSt = ce.statusUpdatedAt || ceTs;
+  // Resolve status independently using its own timestamp.
+  // Fall back to createdAt (NOT updatedAt) so a QE amount save that bumps
+  // updatedAt cannot accidentally override a Paid/Pending toggle on the other device.
+  const leSt = le.statusUpdatedAt || le.createdAt || 0;
+  const ceSt = ce.statusUpdatedAt || ce.createdAt || 0;
   const statusSrc = leSt >= ceSt ? le : ce;
   if (statusSrc.status === winner.status) return winner;
   const merged = { ...winner, status: statusSrc.status, statusUpdatedAt: Math.max(leSt, ceSt) };
@@ -2415,7 +2416,7 @@ function saveQEGrid() {
           } else {
             const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice, sharedPrice:price,
               vatAmount:cPayType==='invoice'?amount*VAT_RATE:0,
-              paymentType:cPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now() };
+              paymentType:cPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now(), statusUpdatedAt:Date.now() };
             state.income.push(entry); sheetsAdd('income',entry);
           }
           savedCount++; savedTotal += amount;
@@ -2437,7 +2438,7 @@ function saveQEGrid() {
         } else {
           const entry = { id:genId(), clientId:cid, subClient:'', service, amount, qty, unitPrice:price,
             vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0,
-            paymentType:cPayType2, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now() };
+            paymentType:cPayType2, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now(), statusUpdatedAt:Date.now() };
           state.income.push(entry); sheetsAdd('income',entry);
         }
         savedCount++; savedTotal += amount;
@@ -4137,7 +4138,7 @@ function generateRecurring(silent=false) {
       (e.subClient||'')===(subClient||'') && monthKey(e.date)===currentMonth
     );
     if (!exists) {
-      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', status:'Pending', subClient:subClient||'', oneOff:false, createdAt:Date.now(), updatedAt:Date.now() };
+      const entry = { ...tmpl, id:genId(), date:currentMonth+'-01', status:'Pending', subClient:subClient||'', oneOff:false, createdAt:Date.now(), updatedAt:Date.now(), statusUpdatedAt:Date.now() };
       state.income.push(entry);
       sheetsAdd('income', entry);
       generated++;
