@@ -3749,3 +3749,79 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .split-status-col { flex: 1; min-width: 140px; }
 .split-status-col .form-label { margin-top: 0; }
 .split-status-col .status-toggle-group { margin-top: 4px; }
+
+/* ============================================================
+   ONBOARDING / SETUP WIZARD
+   ============================================================ */
+.onboarding-screen {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  padding: 24px; overflow-y: auto;
+}
+.onboarding-card {
+  width: 100%; max-width: 460px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 30px 26px;
+  box-shadow: var(--shadow); backdrop-filter: var(--glass-blur);
+}
+.ob-logo { display: flex; justify-content: center; margin-bottom: 16px; }
+.ob-title { font-size: 23px; font-weight: 800; letter-spacing: -0.02em; text-align: center; color: var(--text); }
+.ob-sub { font-size: 14px; color: var(--text-muted); text-align: center; margin: 8px 0 22px; line-height: 1.5; }
+.ob-options { display: flex; flex-direction: column; gap: 10px; }
+.ob-option {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 15px 16px; border-radius: var(--radius-sm);
+  background: var(--bg-card2); border: 1.5px solid var(--border);
+  cursor: pointer; transition: var(--transition); font-family: inherit;
+}
+.ob-option:hover { border-color: var(--accent); }
+.ob-option.selected { border-color: var(--accent); background: var(--accent-light); }
+.ob-opt-icon { font-size: 20px; width: 26px; text-align: center; flex-shrink: 0; }
+.ob-opt-body { flex: 1; }
+.ob-opt-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.ob-opt-desc { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+.ob-opt-check {
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 11px; opacity: 0; transition: var(--transition);
+}
+.ob-option.selected .ob-opt-check { opacity: 1; background: var(--accent); border-color: var(--accent); }
+.ob-salary { margin-top: 18px; }
+.ob-finish { margin-top: 22px; }
+
+/* ============================================================
+   MAIN JOB (salary) VIEW
+   ============================================================ */
+.mj-salary-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 22px 24px; box-shadow: var(--shadow-sm);
+}
+.mj-salary-label { font-size: 13px; color: var(--text-muted); font-weight: 600; }
+.mj-salary-amount { font-size: 32px; font-weight: 800; color: var(--text); letter-spacing: -0.02em; margin-top: 2px; }
+.mj-stats { display: flex; gap: 12px; margin-top: 14px; }
+.mj-stat {
+  flex: 1; background: var(--bg-card2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; color: var(--text-muted);
+}
+.mj-stat strong { font-size: 16px; font-weight: 800; }
+.mj-stat strong.green { color: var(--green); }
+.mj-stat strong.amber { color: var(--amber); }
+.mj-months { display: flex; flex-direction: column; gap: 8px; }
+.mj-month-row {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 16px;
+}
+.mj-month-name { flex: 1; font-weight: 600; color: var(--text); }
+.mj-month-amt { font-weight: 800; color: var(--text); }
+.mj-status-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 50px; font-size: 12px; font-weight: 700;
+  cursor: pointer; border: 1px solid transparent; font-family: inherit;
+}
+.mj-status-btn.paid    { background: var(--green-light); color: var(--green); }
+.mj-status-btn.pending { background: var(--amber-light); color: var(--amber); }

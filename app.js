@@ -113,7 +113,15 @@ const DEFAULT_CLIENTS = [
 ];
 
 // ── State ──────────────────────────────────────────────────────
-let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{} };
+// profile.sources controls which income sections show: { clients, mainJob, sideHustles }
+// profile.onboarded gates the first-run wizard. Income/clients carry kind:
+// 'client' (default) | 'sidehustle' | 'mainjob'.
+let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{}, profile:null };
+
+const MAINJOB_CLIENT_ID = '__mainjob__'; // the single pseudo-client that holds salary income
+function defaultProfile() { return { onboarded:false, sources:{ clients:true, mainJob:false, sideHustles:false } }; }
+function clientKind(c) { return (c && c.kind) ? c.kind : 'client'; }
+function profileHas(src) { return !!(state.profile && state.profile.sources && state.profile.sources[src]); }
 let currentView = 'dashboard';
 
 // Auto-sync
@@ -275,23 +283,27 @@ async function loadData() {
   try {
     const p = await idbGet(STORAGE_KEY);
     if (p) {
-      state.clients      = p.clients    || DEFAULT_CLIENTS;
+      state.clients      = p.clients    || [];
       state.income       = p.income     || [];
       state.expenses     = p.expenses   || [];
       state.services     = p.services   || [...DEFAULT_SERVICES];
       state.deletedIds   = p.deletedIds || [];
       state.deletedAt    = p.deletedAt || {};
       state.monthlyStopped = p.monthlyStopped || {};
+      state.profile      = p.profile || null;
       state.lastModified = p.lastModified || 0;
     } else {
-      state.clients  = DEFAULT_CLIENTS;
+      // Brand-new on this device → clean slate; the onboarding wizard sets things up
+      state.clients  = [];
       state.services = [...DEFAULT_SERVICES];
+      state.profile  = null;
     }
-  } catch(e) { state.clients = DEFAULT_CLIENTS; state.services = [...DEFAULT_SERVICES]; }
+  } catch(e) { state.clients = []; state.services = [...DEFAULT_SERVICES]; }
   state.clients.forEach(c => {
     if (!c.paymentType) c.paymentType = 'invoice';
     if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
     if (!Array.isArray(c.subclients)) c.subclients = []; // backfill so edit never crashes
+    if (!c.kind) c.kind = 'client'; // backfill source kind
   });
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
@@ -764,7 +776,7 @@ function navigate(view) {
   document.querySelectorAll('.bottom-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.view').forEach(el=>el.classList.add('hidden'));
   document.getElementById('view-'+view).classList.remove('hidden');
-  const titles={dashboard:'Dashboard',income:'Income',expenses:'Expenses',clients:'Clients',quickentry:'Quick Entry',reports:'Reports',services:'Services',monthly:'Monthly'};
+  const titles={dashboard:'Dashboard',income:'Income',expenses:'Expenses',clients:'Clients',mainjob:'Main Job',sidehustles:'Side Hustles',quickentry:'Quick Entry',reports:'Reports',services:'Services',monthly:'Monthly'};
   document.getElementById('topbarTitle').textContent = titles[view]||'';
   renderView(view);
 }
@@ -774,6 +786,8 @@ function renderView(v) {
   else if (v==='income')    renderIncome();
   else if (v==='expenses')  renderExpenses();
   else if (v==='clients')   renderClients();
+  else if (v==='mainjob')   renderMainJob();
+  else if (v==='sidehustles') renderSideHustles();
   else if (v==='quickentry')renderQuickEntry();
   else if (v==='reports')   renderReports();
   else if (v==='services')  renderServices();
@@ -791,7 +805,10 @@ function renderColorSwatches(containerId, selectedColor, callbackFn) {
     </div>`).join('');
 }
 
-function openAddClient() {
+let addClientKind = 'client'; // 'client' | 'sidehustle'
+function openAddSideHustle() { openAddClient('sidehustle'); }
+function openAddClient(kind) {
+  addClientKind  = kind || 'client';
   addClientType  = 'Direct';
   addClientColor = CLIENT_COLORS[Math.floor(Math.random()*CLIENT_COLORS.length)];
   document.getElementById('addClientName').value = '';
@@ -802,6 +819,16 @@ function openAddClient() {
   const prev = document.getElementById('addClientImgPreview');
   if (prev) prev.innerHTML = '<i class="fa-solid fa-camera"></i>';
   renderColorSwatches('addColorSwatches', addClientColor, 'setAddColor');
+  // Side hustles are simple named sources — hide the Agency/sub-client machinery
+  const isSH = addClientKind === 'sidehustle';
+  const titleEl = document.querySelector('#sheetAddClient .sheet-title');
+  if (titleEl) titleEl.textContent = isSH ? 'Add Side Hustle' : 'Add New Client';
+  const nameInp = document.getElementById('addClientName');
+  if (nameInp) nameInp.placeholder = isSH ? 'Side hustle name… (e.g. Etsy shop)' : 'Client name…';
+  const typeGroup = document.getElementById('addTypeDirect')?.closest('.form-group');
+  if (typeGroup) typeGroup.style.display = isSH ? 'none' : '';
+  const saveBtn = document.querySelector('#sheetAddClient .btn-save');
+  if (saveBtn) saveBtn.innerHTML = isSH ? '<i class="fa-solid fa-check"></i> Add Side Hustle' : '<i class="fa-solid fa-check"></i> Add Client';
   _openSheet('sheetAddClient');
 }
 
@@ -817,19 +844,21 @@ function setAddColor(color) {
 }
 
 function saveNewClient() {
+  const isSH  = addClientKind === 'sidehustle';
+  const label = isSH ? 'side hustle' : 'client';
   const name = document.getElementById('addClientName').value.trim();
-  if (!name) { showToast('Please enter a client name','error'); return; }
+  if (!name) { showToast(`Please enter a ${label} name`,'error'); return; }
   if (state.clients.find(c=>c.name.toLowerCase()===name.toLowerCase())) {
-    showToast('A client with this name already exists','error'); return;
+    showToast(`A ${label} with this name already exists`,'error'); return;
   }
-  const nc = { id:'C'+Date.now(), name, type:addClientType, color:addClientColor, subclients:[] };
+  const nc = { id:'C'+Date.now(), name, type:isSH?'Direct':addClientType, color:addClientColor, subclients:[], kind:addClientKind || 'client', paymentType: isSH?'cash':'invoice' };
   const imgData = document.getElementById('addClientImgData')?.value;
   if (imgData) nc.image = imgData;
   state.clients.push(nc);
   saveData();
   closeAllModals();
-  showToast(`Client "${name}" added`);
-  renderClients();
+  showToast(`${isSH?'Side hustle':'Client'} "${name}" added`);
+  navigate(isSH ? 'sidehustles' : 'clients');
 }
 
 function openEditClient(clientId) {
@@ -957,8 +986,8 @@ function saveClientEdit() {
   if (imgData) c.image = imgData;
   saveData();
   closeSheet('sheetEditClient');
-  showToast(`Client "${name}" updated`);
-  renderClients();
+  showToast(`${clientKind(c)==='sidehustle'?'Side hustle':'Client'} "${name}" updated`);
+  renderView(currentView);
 }
 
 function deleteClientFromEdit() {
@@ -972,7 +1001,7 @@ function deleteClientFromEdit() {
   saveData();
   closeSheet('sheetEditClient');
   showToast(`"${c.name}" deleted`);
-  renderClients();
+  renderView(currentView);
 }
 
 // ── Services Management ────────────────────────────────────────
@@ -1090,7 +1119,8 @@ function pickService(inputId, pillsId, service) {
 function filterClientDropdown() {
   const q   = document.getElementById('incomeClientSearch').value.toLowerCase();
   const dd  = document.getElementById('clientDropdown');
-  const hits = state.clients.filter(c=>c.name.toLowerCase().includes(q));
+  // Exclude the Main Job pseudo-client (salary is managed in its own tab)
+  const hits = state.clients.filter(c=>clientKind(c)!=='mainjob' && c.name.toLowerCase().includes(q));
   if (!hits.length) {
     dd.innerHTML = '<div class="client-dd-empty">No clients found</div>';
   } else {
@@ -3629,10 +3659,20 @@ function renderExpenses() {
 function setExpFilter(t,v){ if(t==='month')expMonth=v; if(t==='category')expCategory=v; saveUIState(); renderExpenses(); }
 
 // ── RENDER: Clients ────────────────────────────────────────────
-function renderClients() {
-  const cont = document.getElementById('clientsGrid');
+function renderClients()     { renderClientCards('clientsGrid',    'client'); }
+function renderSideHustles()  { renderClientCards('sideHustlesGrid','sidehustle'); }
+
+function renderClientCards(containerId, kind) {
+  const cont = document.getElementById(containerId);
+  if (!cont) return;
   cont.innerHTML = '';
-  state.clients.forEach(c=>{
+  const list = state.clients.filter(c => clientKind(c) === kind);
+  if (!list.length) {
+    cont.innerHTML = `<div class="ov-empty" style="grid-column:1/-1;padding:30px">${kind==='sidehustle'?'No side hustles yet — tap “Add Side Hustle”.':'No clients yet — tap “Add Client”.'}</div>`;
+    return;
+  }
+  const isSH = kind === 'sidehustle';
+  list.forEach(c=>{
     const ci    = state.income.filter(e=>e.clientId===c.id);
     const total = ci.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
     const card  = document.createElement('div');
@@ -3642,6 +3682,9 @@ function renderClients() {
       ? `<img src="${c.image}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
       : initials(c.name);
     const avatarStyle = c.image ? '' : `background:${c.color}22;color:${c.color};border:2px solid ${c.color}44`;
+    const subtitle = isSH
+      ? 'Side hustle'
+      : `${c.type==='Agency'?`Agency · ${(c.subclients||[]).length} sub-clients`:'Direct Client'} · <span class="client-pay-badge ${c.paymentType||'invoice'}">${c.paymentType==='cash'?'Cash':'Invoice'}</span>`;
     card.innerHTML = `
       <div style="position:absolute;top:0;left:0;right:0;height:4px;background:${c.color};border-radius:16px 16px 0 0;"></div>
       <button class="client-card-edit" onclick="event.stopPropagation();openEditClient('${c.id}')">
@@ -3649,10 +3692,10 @@ function renderClients() {
       </button>
       <div class="client-card-avatar" style="${avatarStyle}">${avatarInner}</div>
       <div class="client-card-name">${c.name}</div>
-      <div class="client-card-type">${c.type==='Agency'?`Agency · ${(c.subclients||[]).length} sub-clients`:'Direct Client'} · <span class="client-pay-badge ${c.paymentType||'invoice'}">${c.paymentType==='cash'?'Cash':'Invoice'}</span></div>
+      <div class="client-card-type">${subtitle}</div>
       <div class="client-card-stats">
         <div class="client-stat"><span class="client-stat-label">Total Earned</span><span class="client-stat-val green">${fmt(total)}</span></div>
-        <div class="client-stat"><span class="client-stat-label">Jobs</span><span class="client-stat-val">${ci.length}</span></div>
+        <div class="client-stat"><span class="client-stat-label">${isSH?'Entries':'Jobs'}</span><span class="client-stat-val">${ci.length}</span></div>
       </div>`;
     cont.appendChild(card);
   });
@@ -4879,6 +4922,7 @@ async function autoPull(silent) {
     state.deletedIds = [...allDeletedIds];
     state.deletedAt  = mergedDeletedAt;
     state.monthlyStopped = mergedStopped;
+    if (p.profile) state.profile = p.profile; // cloud profile wins if present
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
@@ -4902,6 +4946,7 @@ async function autoPull(silent) {
     if (incChanged || expChanged || statusChanged || !silent) {
       navigate(currentView);
     }
+    afterSyncProfile();
     setSyncIndicator('ok');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
     if (!silent) showToast('☁ Updated from cloud');
@@ -4946,11 +4991,13 @@ async function cloudPull() {
     state.income   = p.income   || [];
     state.expenses = p.expenses || [];
     state.services = p.services || [...DEFAULT_SERVICES];
+    if (p.profile) state.profile = p.profile;
     state.lastModified = p.lastModified || Date.now();
     idbSet(STORAGE_KEY, state);
     deduplicateIncome();
     deduplicateExpenses();
     navigate(currentView);
+    afterSyncProfile();
     showToast('✓ Pulled from cloud');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
   } catch(e) { showToast('Pull failed: ' + e.message, 'error'); }
@@ -5062,6 +5109,7 @@ async function autoPullForced() {
     state.income     = [...filteredCloudIncome,   ...localOnlyIncome];
     state.expenses   = [...filteredCloudExpenses, ...localOnlyExpense];
     state.services   = p.services || [...DEFAULT_SERVICES];
+    if (p.profile) state.profile = p.profile;
     state.deletedIds = [...allDeletedIdsF];
     state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
     state.monthlyStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
@@ -5073,6 +5121,7 @@ async function autoPullForced() {
     // Push merged result back if we had local-only entries
     if (localOnlyIncome.length || localOnlyExpense.length) scheduleAutoPush();
     navigate(currentView);
+    afterSyncProfile();
     setSyncIndicator('ok');
     updateSyncModalStatus('Last pull: ' + new Date().toLocaleTimeString());
     setTimeout(() => setSyncIndicator('idle'), 3000);
@@ -5217,6 +5266,181 @@ function toggleThemeMenu(e) {
   menu.classList.toggle('hidden', !willOpen);
 }
 
+// ── Onboarding / Profile / Main Job ────────────────────────────
+let _obSources = { mainJob:false, clients:false, sideHustles:false };
+let _obIsSetup = false;
+
+// Show or hide the Clients / Main Job / Side Hustles nav items per profile
+function applyProfileNav() {
+  const src = (state.profile && state.profile.sources) ? state.profile.sources : { clients:true };
+  document.querySelectorAll('.nav-item[data-src]').forEach(el => {
+    el.style.display = src[el.dataset.src] ? '' : 'none';
+  });
+  const map = { mainjob:'mainJob', clients:'clients', sidehustles:'sideHustles' };
+  if (map[currentView] && !src[map[currentView]]) navigate('dashboard');
+}
+
+// After a cloud sync: dismiss the wizard if the pulled profile is onboarded, and refresh nav
+function afterSyncProfile() {
+  if (state.profile && state.profile.onboarded) {
+    document.getElementById('onboardingScreen')?.classList.add('hidden');
+  }
+  applyProfileNav();
+}
+
+// Decide whether to show the first-run wizard. Called after load + after sync.
+function decideOnboarding() {
+  if (state.profile && state.profile.onboarded) { applyProfileNav(); return; }
+  const hasData = (state.income && state.income.length) ||
+                  (state.clients && state.clients.some(c => clientKind(c) === 'client'));
+  if (hasData) {
+    // Existing user with data but no profile → keep Clients on, skip the wizard
+    state.profile = { onboarded:true, sources:{
+      clients:true,
+      mainJob: state.clients.some(c => c.id === MAINJOB_CLIENT_ID),
+      sideHustles: state.clients.some(c => clientKind(c) === 'sidehustle')
+    }};
+    saveData(); applyProfileNav(); return;
+  }
+  showOnboarding(false); // genuinely new account
+}
+
+function showOnboarding(isSetup) {
+  _obIsSetup = !!isSetup;
+  const src = (state.profile && state.profile.sources) ? state.profile.sources : { clients:false, mainJob:false, sideHustles:false };
+  _obSources = { mainJob:!!src.mainJob, clients:!!src.clients, sideHustles:!!src.sideHustles };
+  ['mainJob','clients','sideHustles'].forEach(obReflect);
+  document.getElementById('obSalaryGroup').classList.toggle('hidden', !_obSources.mainJob);
+  document.getElementById('obSalaryAmount').value = isSetup ? (currentSalary() || '') : '';
+  document.getElementById('obTitle').textContent = isSetup ? 'Your sections' : "Let's set up Mastermind";
+  document.getElementById('obSub').textContent = isSetup
+    ? 'Turn sections on or off anytime. Existing data is never deleted.'
+    : 'What do you want to track? Pick everything that applies — you can change this anytime.';
+  document.getElementById('obFinishBtn').innerHTML = isSetup ? '<i class="fa-solid fa-check"></i> Save' : '<i class="fa-solid fa-check"></i> Get started';
+  document.getElementById('onboardingScreen').classList.remove('hidden');
+}
+
+function obReflect(k) {
+  const id = k==='mainJob'?'obOptMainJob':k==='clients'?'obOptClients':'obOptSideHustles';
+  document.getElementById(id)?.classList.toggle('selected', !!_obSources[k]);
+}
+function obToggleSource(k) {
+  _obSources[k] = !_obSources[k];
+  obReflect(k);
+  if (k === 'mainJob') document.getElementById('obSalaryGroup').classList.toggle('hidden', !_obSources.mainJob);
+}
+
+function obFinish() {
+  if (!_obSources.mainJob && !_obSources.clients && !_obSources.sideHustles) _obSources.clients = true;
+  state.profile = state.profile || defaultProfile();
+  state.profile.onboarded = true;
+  state.profile.sources = { mainJob:_obSources.mainJob, clients:_obSources.clients, sideHustles:_obSources.sideHustles };
+  if (_obSources.mainJob) {
+    const amt = parseFloat(document.getElementById('obSalaryAmount').value);
+    if (amt && amt > 0) setSalary(amt); else ensureMainJobClient();
+  }
+  saveData();
+  document.getElementById('onboardingScreen').classList.add('hidden');
+  applyProfileNav();
+  if (_obIsSetup) {
+    renderView(currentView);
+    showToast('✓ Sections updated');
+  } else {
+    const first = _obSources.mainJob ? 'mainjob' : _obSources.clients ? 'clients' : _obSources.sideHustles ? 'sidehustles' : 'dashboard';
+    navigate('dashboard');
+    showToast('✓ All set! Welcome to Mastermind');
+  }
+}
+function openSetup() { closeMobileSidebar(); showOnboarding(true); }
+
+// ── Main Job salary ────────────────────────────────────────────
+function getMainJobClient() { return state.clients.find(c => c.id === MAINJOB_CLIENT_ID); }
+function ensureMainJobClient() {
+  let c = getMainJobClient();
+  if (!c) {
+    c = { id:MAINJOB_CLIENT_ID, name:'Main Job', type:'Direct', color:'#3b82f6', subclients:[], paymentType:'cash', kind:'mainjob' };
+    state.clients.push(c);
+  }
+  return c;
+}
+function mainJobIncome() { return state.income.filter(e => e.clientId === MAINJOB_CLIENT_ID); }
+function currentSalary() {
+  const recs = mainJobIncome().filter(e => e.recurring && !e.oneOff).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  return recs.length ? recs[0].amount : (mainJobIncome().slice(-1)[0]?.amount || 0);
+}
+// Set/update the monthly salary — current month becomes the recurring template;
+// generateRecurring then auto-adds future months from it.
+function setSalary(amount) {
+  amount = parseFloat(amount) || 0;
+  if (amount <= 0) return;
+  ensureMainJobClient();
+  const m = todayVal().slice(0,7);
+  const now = Date.now();
+  let e = state.income.find(x => x.clientId === MAINJOB_CLIENT_ID && monthKey(x.date) === m);
+  if (e) { e.amount = amount; e.recurring = true; e.oneOff = false; e.service = 'Salary'; e.updatedAt = now; }
+  else {
+    state.income.push({ id:genId(), clientId:MAINJOB_CLIENT_ID, subClient:'', service:'Salary',
+      amount, vatAmount:0, paymentType:'cash', date:m+'-01', status:'Pending', recurring:true,
+      source:'mainjob', createdAt:now, updatedAt:now, statusUpdatedAt:now });
+  }
+  saveData();
+}
+function promptSalary() {
+  const cur = currentSalary();
+  const v = prompt('Monthly net salary (€):', cur > 0 ? String(cur) : '');
+  if (v === null) return;
+  const amt = parseFloat(v);
+  if (!amt || amt <= 0) { showToast('Enter a valid amount','error'); return; }
+  setSalary(amt);
+  showToast('✓ Salary updated');
+  renderMainJob();
+}
+// Generic single-entry status flip (used by Main Job months)
+function toggleEntryStatus(id) {
+  const e = state.income.find(x => x.id === id); if (!e) return;
+  const ns = e.status === 'Paid' ? 'Pending' : 'Paid';
+  const now = Date.now();
+  e.status = ns; e.updatedAt = now; e.statusUpdatedAt = now;
+  if (ns === 'Paid') e.paidDate = now; else delete e.paidDate;
+  saveData(); renderView(currentView);
+  showToast(ns === 'Paid' ? '✓ Marked Paid' : '⏳ Marked Pending');
+}
+
+function renderMainJob() {
+  const cont = document.getElementById('mainJobContent');
+  if (!cont) return;
+  const sal = currentSalary();
+  const entries = mainJobIncome().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const yr = todayVal().slice(0,4);
+  const collected = entries.filter(e=>e.status==='Paid'   && (e.date||'').startsWith(yr)).reduce((s,e)=>s+e.amount,0);
+  const pending   = entries.filter(e=>e.status!=='Paid'  && (e.date||'').startsWith(yr)).reduce((s,e)=>s+e.amount,0);
+  let html = `<div class="mj-salary-card">
+      <div>
+        <div class="mj-salary-label">Monthly salary</div>
+        <div class="mj-salary-amount">${fmt(sal)}</div>
+      </div>
+      <button class="btn-add-client" onclick="promptSalary()"><i class="fa-solid fa-pen"></i> ${sal>0?'Change':'Set salary'}</button>
+    </div>
+    <div class="mj-stats">
+      <div class="mj-stat"><span>Collected ${yr}</span><strong class="green">${fmt(collected)}</strong></div>
+      <div class="mj-stat"><span>Pending ${yr}</span><strong class="amber">${fmt(pending)}</strong></div>
+    </div>
+    <div class="section-title" style="margin-top:24px;margin-bottom:12px">Months</div>`;
+  if (!entries.length) {
+    html += `<div class="ov-empty" style="padding:24px">No salary entries yet — set your monthly salary above and it will repeat automatically each month.</div>`;
+  } else {
+    html += `<div class="mj-months">` + entries.map(e=>{
+      const sl = e.status.toLowerCase();
+      return `<div class="mj-month-row">
+        <span class="mj-month-name">${monthLabel(monthKey(e.date))}</span>
+        <span class="mj-month-amt">${fmt(e.amount)}</span>
+        <button class="mj-status-btn ${sl}" onclick="toggleEntryStatus('${e.id}')"><i class="fa-solid fa-${sl==='paid'?'circle-check':'clock'}"></i> ${e.status}</button>
+      </div>`;
+    }).join('') + `</div>`;
+  }
+  cont.innerHTML = html;
+}
+
 async function init() {
   await loadData();
   // Always start income/expense tabs on current month (override UIState)
@@ -5325,6 +5549,8 @@ async function init() {
 
   // Navigate to last-used view (restored by loadUIState inside loadData)
   navigate(currentView);
+  // First-run wizard / nav visibility per profile
+  decideOnboarding();
   // Start auto-sync (will pull from cloud and re-render only if cloud data is newer)
   startAutoSync();
   // Safety net: re-render after 300ms in case any async op clobbered the first render
