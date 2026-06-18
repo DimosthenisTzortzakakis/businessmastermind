@@ -137,6 +137,8 @@ let expViewMode = 'bycategory'; // 'bycategory' | 'detailed' | 'excel'
 
 // Split payment
 let incSplitMode = false;
+let splitInvStatus  = 'Paid'; // independent status for the invoice half
+let splitCashStatus = 'Paid'; // independent status for the cash half
 
 // Qty × Price mode in income form
 let incQtyMode = false;
@@ -1172,6 +1174,11 @@ function resetIncomeForm() {
   document.getElementById('incPayTypeGroup').classList.remove('hidden');
   document.getElementById('splitInvoiceAmt').value = '';
   document.getElementById('splitCashAmt').value    = '';
+  // Reset per-half split statuses + re-show the single Status toggle
+  splitInvStatus = 'Paid'; splitCashStatus = 'Paid';
+  setSplitStatus('inv', 'Paid'); setSplitStatus('cash', 'Paid');
+  const _sg = document.getElementById('incStatusGroup');
+  if (_sg) _sg.classList.remove('hidden');
 
   // Reset qty mode
   incQtyMode = false;
@@ -1389,8 +1396,30 @@ function setIncSplit(v) {
   document.getElementById('splitAmountsGroup').classList.toggle('hidden', !v);
   document.getElementById('incAmountGroup').classList.toggle('hidden', v || incQtyMode);
   document.getElementById('incPayTypeGroup').classList.toggle('hidden', v);
-  if (v) { updateSplitPreview(); }
-  else   { updateVATPreview(); }
+  // In split mode each half carries its OWN status, so hide the single Status toggle
+  const sg = document.getElementById('incStatusGroup');
+  if (sg) sg.classList.toggle('hidden', v);
+  if (v) {
+    // Seed both halves from the current single status the first time split turns on
+    setSplitStatus('inv',  splitInvStatus  || incomeStatus);
+    setSplitStatus('cash', splitCashStatus || incomeStatus);
+    updateSplitPreview();
+  } else {
+    updateVATPreview();
+  }
+}
+
+// Per-half status for split payments — invoice and cash are independent
+function setSplitStatus(which, s) {
+  if (which === 'inv') {
+    splitInvStatus = s;
+    document.getElementById('splitInvPaid').classList.toggle('active',    s==='Paid');
+    document.getElementById('splitInvPending').classList.toggle('active', s==='Pending');
+  } else {
+    splitCashStatus = s;
+    document.getElementById('splitCashPaid').classList.toggle('active',    s==='Paid');
+    document.getElementById('splitCashPending').classList.toggle('active', s==='Pending');
+  }
 }
 
 function setIncQtyMode(v) {
@@ -1558,12 +1587,19 @@ function saveIncome() {
       pushUndo('Add split payment');
     }
 
-    const sgId = genId(); // shared group id links the two halves
-    const base = { clientId, subClient, service, date:rawDate, status:incomeStatus, notes,
-                   recurring:incRecurring, splitGroupId:sgId, createdAt:Date.now(), statusUpdatedAt:Date.now() };
+    const sgId = genId(); // shared group id links the two halves (for amount edits only)
+    const now  = Date.now();
+    // The two halves keep INDEPENDENT statuses — changing one never flips the other
+    const base = { clientId, subClient, service, date:rawDate, notes,
+                   recurring:incRecurring, splitGroupId:sgId, createdAt:now };
+    const mkHalf = (extra, st) => {
+      const e = { ...base, id:genId(), status:st, statusUpdatedAt:now, ...extra };
+      if (st === 'Paid') e.paidDate = now;
+      return e;
+    };
     const entries = [];
-    if (invAmt>0)  entries.push({ ...base, id:genId(), amount:invAmt,  vatAmount:invAmt*VAT_RATE, paymentType:'invoice' });
-    if (cashAmt>0) entries.push({ ...base, id:genId(), amount:cashAmt, vatAmount:0,               paymentType:'cash' });
+    if (invAmt>0)  entries.push(mkHalf({ amount:invAmt,  vatAmount:invAmt*VAT_RATE, paymentType:'invoice' }, splitInvStatus));
+    if (cashAmt>0) entries.push(mkHalf({ amount:cashAmt, vatAmount:0,               paymentType:'cash'    }, splitCashStatus));
     entries.forEach(e=>{ state.income.push(e); sheetsAdd('income',e); });
     saveData(); closeAllModals();
     showToast(`Split saved — Invoice ${fmt(invAmt)} + Cash ${fmt(cashAmt)}`);
@@ -1754,16 +1790,16 @@ function openEntryDetail(type, id) {
       ${e.subClient?`<div class="ed-row"><span>Sub-Client</span><strong>${e.subClient}</strong></div>`:''}
       <div class="ed-row"><span>Service</span><strong>${e.service}</strong></div>
       ${isSplit
-        ? `<div class="ed-row"><span>Invoice</span><strong style="color:var(--green)">${fmt(invE.amount)} <span style="opacity:.6;font-size:11px">+ VAT ${fmt(invE.vatAmount)}</span></strong></div>
-           <div class="ed-row"><span>Cash</span><strong style="color:var(--green)">${fmt(cashE.amount)}</strong></div>
+        ? `<div class="ed-row"><span>Invoice</span><strong style="color:var(--green)">${fmt(invE.amount)} <span style="opacity:.6;font-size:11px">+ VAT ${fmt(invE.vatAmount)}</span> <span style="font-size:11px;color:${invE.status==='Paid'?'var(--green)':'var(--amber)'}">· ${invE.status}</span></strong></div>
+           <div class="ed-row"><span>Cash</span><strong style="color:var(--green)">${fmt(cashE.amount)} <span style="font-size:11px;color:${cashE.status==='Paid'?'var(--green)':'var(--amber)'}">· ${cashE.status}</span></strong></div>
            <div class="ed-row"><span>Total</span><strong style="color:var(--green)">${fmt(invE.amount+cashE.amount)}</strong></div>
            <div class="ed-row"><span>Type</span><strong>Split (Invoice + Cash)</strong></div>`
         : `<div class="ed-row"><span>Amount</span><strong style="color:var(--green)">${fmt(e.amount)}</strong></div>
            ${e.vatAmount>0?`<div class="ed-row"><span>VAT</span><strong>${fmt(e.vatAmount)}</strong></div>`:''}
            <div class="ed-row"><span>Type</span><strong>${e.paymentType==='invoice'?'Invoice':'Cash'}</strong></div>`}
       <div class="ed-row"><span>Date</span><strong>${toDateStr(e.date)}</strong></div>
-      <div class="ed-row"><span>Status</span><strong>${e.status}</strong></div>
-      ${e.paidDate?`<div class="ed-row"><span>Paid on</span><strong style="color:var(--green)">${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</strong></div>`:''}
+      ${isSplit?'':`<div class="ed-row"><span>Status</span><strong>${e.status}</strong></div>`}
+      ${!isSplit && e.paidDate?`<div class="ed-row"><span>Paid on</span><strong style="color:var(--green)">${toDateStr(new Date(e.paidDate).toISOString().slice(0,10))}</strong></div>`:''}
       ${e.recurring?'<div class="ed-row"><span>Monthly</span><strong>Yes</strong></div>':''}
       ${e.notes?`<div class="ed-row"><span>Notes</span><strong>${e.notes}</strong></div>`:''}`;
   } else {
@@ -1838,6 +1874,9 @@ function openEditEntry(type, id) {
       const cashEntry = e.paymentType === 'cash'    ? e : companion;
       document.getElementById('splitInvoiceAmt').value = invEntry.amount;
       document.getElementById('splitCashAmt').value    = cashEntry.amount;
+      // Pre-fill each half's OWN status so they stay independent
+      setSplitStatus('inv',  invEntry.status  || 'Paid');
+      setSplitStatus('cash', cashEntry.status || 'Paid');
       updateSplitPreview();
     } else {
       // Normal single entry

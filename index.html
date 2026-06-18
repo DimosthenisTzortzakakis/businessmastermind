@@ -500,6 +500,22 @@
           <span id="splitVATText">Invoice VAT: €0.00</span>
           <span id="splitTotalText" class="vat-gross">Client pays total: €0.00</span>
         </div>
+        <div class="split-status-row">
+          <div class="split-status-col">
+            <label class="form-label">Invoice status <span class="optional">— independent</span></label>
+            <div class="status-toggle-group">
+              <button class="status-btn paid active" id="splitInvPaid" onclick="setSplitStatus('inv','Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>
+              <button class="status-btn pending" id="splitInvPending" onclick="setSplitStatus('inv','Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
+            </div>
+          </div>
+          <div class="split-status-col">
+            <label class="form-label">Cash status <span class="optional">— independent</span></label>
+            <div class="status-toggle-group">
+              <button class="status-btn paid active" id="splitCashPaid" onclick="setSplitStatus('cash','Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>
+              <button class="status-btn pending" id="splitCashPending" onclick="setSplitStatus('cash','Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Date</label>
@@ -521,7 +537,7 @@
           <button class="toggle-btn active" id="incRecurringNo" onclick="setIncRecurring(false)"><i class="fa-solid fa-xmark"></i> No</button>
         </div>
       </div>
-      <div class="form-group">
+      <div class="form-group" id="incStatusGroup">
         <label class="form-label">Status</label>
         <div class="status-toggle-group">
           <button class="status-btn paid active" id="statusPaid" onclick="setStatus('Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>

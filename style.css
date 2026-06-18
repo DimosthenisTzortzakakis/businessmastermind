@@ -3743,3 +3743,9 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* Client name group-headers: ensure strong dark text (keeps coloured
    sub-headers €/unit & Total intact since those carry their own colour) */
 [data-theme="light"] .qe-th-client { color: var(--text); }
+
+/* Per-half status toggles inside the split-payment group */
+.split-status-row { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.split-status-col { flex: 1; min-width: 140px; }
+.split-status-col .form-label { margin-top: 0; }
+.split-status-col .status-toggle-group { margin-top: 4px; }
