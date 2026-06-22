@@ -315,7 +315,12 @@ async function loadData() {
     if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
     if (!Array.isArray(c.subclients)) c.subclients = []; // backfill so edit never crashes
     if (!c.kind) c.kind = 'client'; // backfill source kind
+    // Trim subclient names — a stray trailing space (e.g. "Other projects ") breaks
+    // Quick Entry column↔entry matching and hides duplicates that can't be deleted.
+    c.subclients = c.subclients.map(s => typeof s === 'string' ? s.trim() : s);
   });
+  // Normalise existing entries' subClient the same way so they keep matching columns
+  state.income.forEach(e => { if (typeof e.subClient === 'string') e.subClient = e.subClient.trim(); });
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
   pruneQEGridData();
