@@ -779,6 +779,8 @@ function renderSearchResults() {
 
 // ── Navigation ─────────────────────────────────────────────────
 function navigate(view) {
+  // Flush any pending Quick Entry draft before leaving it
+  if (currentView === 'quickentry' && _qePersistTimer) { clearTimeout(_qePersistTimer); _qePersistTimer = null; try { idbSet(QE_GRID_KEY, qeGridData); } catch(_) {} }
   currentView = view;
   saveUIState();
   clearSearch();
@@ -2070,6 +2072,27 @@ function hexToRgba(hex, alpha) {
   return 'rgba('+r+','+g+','+b+','+alpha+')';
 }
 
+// Incrementally record a single input into the draft (cheap — O(1)). Used on every
+// keystroke instead of scanning the whole grid.
+function qeCaptureInput(inp) {
+  const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+  const isNumeric = ['qty','price','subqty','subprice'].includes(inp.dataset.type);
+  if (inp.value !== '') qeGridData[key] = inp.value;
+  else if (isNumeric)   qeGridData[key] = '';
+  else delete qeGridData[key];
+  if (inp.dataset.type === 'subnote') {
+    const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
+    const isVisible = inp.style.display !== 'none' && inp.style.display !== '';
+    if (isVisible) qeGridData[visKey] = '1'; else delete qeGridData[visKey];
+  }
+}
+// Debounced persist — avoids an IndexedDB write on every keystroke (the lag source)
+let _qePersistTimer = null;
+function scheduleQEPersist() {
+  clearTimeout(_qePersistTimer);
+  _qePersistTimer = setTimeout(() => { idbSet(QE_GRID_KEY, qeGridData); }, 500);
+}
+
 function captureQEGridData() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
@@ -2094,8 +2117,8 @@ function captureQEGridData() {
       }
     }
   });
-  // Persist draft to localStorage so it survives refresh
-  idbSet(QE_GRID_KEY, qeGridData);
+  // Persist draft (debounced — keeps IndexedDB writes off the render/keystroke path)
+  scheduleQEPersist();
 }
 
 /* Load permanent income entries for the current month into the grid.
@@ -2272,28 +2295,25 @@ function renderQEIncome(cont) {
   if (!qeGridSelectedClients.length && qeEligible.length)
     qeGridSelectedClients = qeEligible.slice(0, 6).map(c=>c.id);
 
-  // Auto-include any client that has income THIS month, so entries added via the
-  // normal "+ Add Entry" are never hidden just because the column wasn't selected.
-  let _qeChanged = false;
+  // Clients that have income THIS month are shown automatically (so "+ Add Entry"
+  // items are never hidden) — computed per-render as a UNION, WITHOUT permanently
+  // growing qeGridSelectedClients (that compounded the grid size every month).
+  const monthActive = new Set();
+  let _qeSvcChanged = false;
   state.income.forEach(e => {
-    if (e.date && e.date.startsWith(qeGridMonth)) {
-      const c = clientById(e.clientId);
-      if (!c || clientKind(c) === 'mainjob') return;
-      if (!qeGridSelectedClients.includes(c.id)) {
-        qeGridSelectedClients.push(c.id);
-        _qeChanged = true;
-      }
-      // Show the entry's real service in the column header (so titles aren't blank/
-      // wrong) when no explicit column service was set for that client/subclient.
-      if (e.service) {
-        const key = e.subClient ? (c.id + '|' + e.subClient) : c.id;
-        if (!qeClientServices[key]) { qeClientServices[key] = e.service; _qeChanged = true; }
-      }
+    if (!e.date || !e.date.startsWith(qeGridMonth)) return;
+    const c = clientById(e.clientId);
+    if (!c || clientKind(c) === 'mainjob') return;
+    monthActive.add(c.id);
+    // Seed the column's service from the entry when none was set (titles not blank)
+    if (e.service) {
+      const key = e.subClient ? (c.id + '|' + e.subClient) : c.id;
+      if (!qeClientServices[key]) { qeClientServices[key] = e.service; _qeSvcChanged = true; }
     }
   });
-  if (_qeChanged) saveUIState();
+  if (_qeSvcChanged) saveUIState();
 
-  const selCols = qeEligible.filter(c=>qeGridSelectedClients.includes(c.id));
+  const selCols = qeEligible.filter(c => qeGridSelectedClients.includes(c.id) || monthActive.has(c.id));
 
   const moOpts = (()=>{
     const ms = allMonths();
@@ -2544,8 +2564,9 @@ function applyQETotalColor(cell, status) {
 }
 
 function updateQEClientTotal(inp) {
-  // Auto-save draft so values survive a refresh
-  captureQEGridData();
+  // Record just this cell + persist on idle (NOT a full grid scan + IDB write per keystroke)
+  qeCaptureInput(inp);
+  scheduleQEPersist();
   const cid = inp.dataset.client;
   const tr = inp.closest('tr');
   const sharedPrice = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="price"]')?.value) || 0;
