@@ -4822,7 +4822,12 @@ async function fbFetch(id, opts) {
     const ok = await refreshAuthToken();
     if (ok) res = await fetch(fbEndpoint(id), opts);
     if (!ok || res.status === 401 || res.status === 403) {
-      if (!_authPromptShown) {
+      // Only force re-login when the token is GENUINELY expired. A 401/403 while
+      // the token is still valid is almost always a transient RTDB hiccup or auth
+      // rules still propagating right after sign-in — signing out here caused the
+      // mobile "connect → instantly kicked back to login" loop.
+      const tokenExpired = !authExpiry || authExpiry < Date.now();
+      if (tokenExpired && !_authPromptShown) {
         _authPromptShown = true;
         showToast('Session expired — please sign in again', 'error');
         doSignOut();
@@ -5976,6 +5981,18 @@ async function handleGoogleRedirect() {
   try {
     const result = await firebase.auth().getRedirectResult();
     if (result && result.user) { await finishFirebaseLogin(result.user); return true; }
+    // iOS Safari storage-partitioning can make getRedirectResult() return null even
+    // though the sign-in succeeded — fall back to the persisted currentUser so the
+    // user isn't bounced back to the login screen (the "kicked out" loop).
+    const cu = firebase.auth().currentUser;
+    if (cu) { await finishFirebaseLogin(cu); return true; }
+    // Last resort: wait briefly for auth state to hydrate, then check once more.
+    const user = await new Promise(resolve => {
+      let done = false;
+      const unsub = firebase.auth().onAuthStateChanged(u => { if (!done) { done = true; unsub && unsub(); resolve(u); } });
+      setTimeout(() => { if (!done) { done = true; unsub && unsub(); resolve(firebase.auth().currentUser); } }, 2500);
+    });
+    if (user) { await finishFirebaseLogin(user); return true; }
   } catch(e) {
     showLoginScreen();
     setLoginError(e.message || 'Google sign-in failed');
@@ -5987,6 +6004,8 @@ async function doGoogleLogin() {
   const btn = document.getElementById('loginGoogleBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
   try {
+    // Persist the session in localStorage so it survives the redirect round-trip
+    try { await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch(_) {}
     const provider = new firebase.auth.GoogleAuthProvider();
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile) {
