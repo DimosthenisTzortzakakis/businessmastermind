@@ -119,7 +119,18 @@ const DEFAULT_CLIENTS = [
 let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{}, profile:null };
 
 const MAINJOB_CLIENT_ID = '__mainjob__'; // the single pseudo-client that holds salary income
-function defaultProfile() { return { onboarded:false, sources:{ clients:true, mainJob:false, sideHustles:false } }; }
+function defaultProfile() { return { onboarded:false, sources:{ clients:true, mainJob:false, sideHustles:false }, hiddenTabs:[] }; }
+// Left-nav items the user can show/hide from Settings (dashboard is always on)
+const TOGGLEABLE_TABS = [
+  { view:'income',     label:'Income' },
+  { view:'expenses',   label:'Expenses' },
+  { view:'calendar',   label:'Calendar' },
+  { view:'quickentry', label:'Quick Entry' },
+  { view:'monthly',    label:'Monthly' },
+  { view:'services',   label:'Services' },
+  { view:'reports',    label:'Reports' },
+];
+function profileHiddenTabs() { return (state.profile && Array.isArray(state.profile.hiddenTabs)) ? state.profile.hiddenTabs : []; }
 function clientKind(c) { return (c && c.kind) ? c.kind : 'client'; }
 function profileHas(src) { return !!(state.profile && state.profile.sources && state.profile.sources[src]); }
 let currentView = 'dashboard';
@@ -776,7 +787,7 @@ function navigate(view) {
   document.querySelectorAll('.bottom-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
   document.querySelectorAll('.view').forEach(el=>el.classList.add('hidden'));
   document.getElementById('view-'+view).classList.remove('hidden');
-  const titles={dashboard:'Dashboard',income:'Income',expenses:'Expenses',clients:'Clients',mainjob:'Main Job',sidehustles:'Side Hustles',quickentry:'Quick Entry',reports:'Reports',services:'Services',monthly:'Monthly'};
+  const titles={dashboard:'Dashboard',income:'Income',expenses:'Expenses',clients:'Clients',sidehustles:'Side Hustles',quickentry:'Quick Entry',reports:'Reports',services:'Services',monthly:'Monthly',calendar:'Calendar',settings:'Settings'};
   document.getElementById('topbarTitle').textContent = titles[view]||'';
   renderView(view);
 }
@@ -786,12 +797,13 @@ function renderView(v) {
   else if (v==='income')    renderIncome();
   else if (v==='expenses')  renderExpenses();
   else if (v==='clients')   renderClients();
-  else if (v==='mainjob')   renderMainJob();
   else if (v==='sidehustles') renderSideHustles();
   else if (v==='quickentry')renderQuickEntry();
   else if (v==='reports')   renderReports();
   else if (v==='services')  renderServices();
   else if (v==='monthly')   renderMonthly();
+  else if (v==='calendar')  renderCalendar();
+  else if (v==='settings')  renderSettings();
 }
 
 // ── Client Management ──────────────────────────────────────────
@@ -5341,14 +5353,28 @@ function toggleThemeMenu(e) {
 let _obSources = { mainJob:false, clients:false, sideHustles:false };
 let _obIsSetup = false;
 
-// Show or hide the Clients / Main Job / Side Hustles nav items per profile
+// Show or hide nav items per profile: income-source items (Clients / Side Hustles)
+// and user-hidden tabs (chosen in Settings). Dashboard & Settings are always reachable.
 function applyProfileNav() {
   const src = (state.profile && state.profile.sources) ? state.profile.sources : { clients:true };
-  document.querySelectorAll('.nav-item[data-src]').forEach(el => {
-    el.style.display = src[el.dataset.src] ? '' : 'none';
+  const hidden = profileHiddenTabs();
+  document.querySelectorAll('.nav-item[data-view]').forEach(el => {
+    const v = el.dataset.view;
+    let show = true;
+    if (el.dataset.src) show = !!src[el.dataset.src];      // source-driven items
+    else if (hidden.includes(v)) show = false;              // user-hidden tabs
+    el.style.display = show ? '' : 'none';
   });
-  const map = { mainjob:'mainJob', clients:'clients', sidehustles:'sideHustles' };
-  if (map[currentView] && !src[map[currentView]]) navigate('dashboard');
+  // also reflect on the bottom (mobile) nav
+  document.querySelectorAll('.bottom-nav-item[data-view]').forEach(el => {
+    const v = el.dataset.view;
+    el.style.display = (hidden.includes(v)) ? 'none' : '';
+  });
+  // If the current view just got hidden, fall back to Dashboard
+  const map = { clients:'clients', sidehustles:'sideHustles' };
+  const srcHidden = map[currentView] && !src[map[currentView]];
+  const tabHidden = hidden.includes(currentView);
+  if ((srcHidden || tabHidden) && currentView !== 'settings') navigate('dashboard');
 }
 
 // After a cloud sync: dismiss the wizard if the pulled profile is onboarded, and refresh nav
@@ -5366,7 +5392,7 @@ function decideOnboarding() {
                   (state.clients && state.clients.some(c => clientKind(c) === 'client'));
   if (hasData) {
     // Existing user with data but no profile → keep Clients on, skip the wizard
-    state.profile = { onboarded:true, sources:{
+    state.profile = { onboarded:true, hiddenTabs:[], sources:{
       clients:true,
       mainJob: state.clients.some(c => c.id === MAINJOB_CLIENT_ID),
       sideHustles: state.clients.some(c => clientKind(c) === 'sidehustle')
@@ -5417,12 +5443,135 @@ function obFinish() {
     renderView(currentView);
     showToast('✓ Sections updated');
   } else {
-    const first = _obSources.mainJob ? 'mainjob' : _obSources.clients ? 'clients' : _obSources.sideHustles ? 'sidehustles' : 'dashboard';
     navigate('dashboard');
     showToast('✓ All set! Welcome to Mastermind');
   }
 }
 function openSetup() { closeMobileSidebar(); showOnboarding(true); }
+
+// ── Settings view (sources, salary, tab visibility) ────────────
+function toggleSource(key) {
+  if (!state.profile) state.profile = defaultProfile();
+  if (!state.profile.sources) state.profile.sources = { clients:true, mainJob:false, sideHustles:false };
+  state.profile.sources[key] = !state.profile.sources[key];
+  if (key === 'mainJob' && state.profile.sources.mainJob) ensureMainJobClient();
+  saveData();
+  applyProfileNav();
+  renderSettings();
+}
+function toggleTabVisible(view) {
+  if (!state.profile) state.profile = defaultProfile();
+  if (!Array.isArray(state.profile.hiddenTabs)) state.profile.hiddenTabs = [];
+  const i = state.profile.hiddenTabs.indexOf(view);
+  if (i >= 0) state.profile.hiddenTabs.splice(i, 1); else state.profile.hiddenTabs.push(view);
+  saveData();
+  applyProfileNav();
+  renderSettings();
+}
+function renderSettings() {
+  const cont = document.getElementById('settingsContent');
+  if (!cont) return;
+  const src = (state.profile && state.profile.sources) ? state.profile.sources : { clients:true, mainJob:false, sideHustles:false };
+  const hidden = profileHiddenTabs();
+  const sw = (on, fn) => `<span class="set-switch ${on?'on':''}" onclick="${fn}"><span class="set-knob"></span></span>`;
+  const srcRow = (key, label, desc, color, icon) => `
+    <div class="set-toggle-row">
+      <div class="set-row-icon" style="color:${color}"><i class="fa-solid ${icon}"></i></div>
+      <div class="set-row-body"><div class="set-row-title">${label}</div><div class="set-row-desc">${desc}</div></div>
+      ${sw(!!src[key], `toggleSource('${key}')`)}
+    </div>`;
+  let html = `<div class="section-title">Income sources</div>
+    <div class="set-card">
+      ${srcRow('mainJob','Salary / main job','A recurring monthly salary','var(--blue)','fa-id-badge')}
+      ${srcRow('clients','Freelance clients','Clients & agencies you invoice','var(--green)','fa-users')}
+      ${srcRow('sideHustles','Side hustles','Other income streams','var(--accent-hover)','fa-rocket')}
+    </div>`;
+  if (src.mainJob) {
+    html += `<div class="section-title" style="margin-top:26px">Main job salary</div><div id="mainJobContent"></div>`;
+  }
+  html += `<div class="section-title" style="margin-top:26px">Visible tabs</div>
+    <p class="monthly-help" style="margin-bottom:12px">Choose what shows in the left menu. Dashboard & Settings are always available.</p>
+    <div class="set-card">` +
+    TOGGLEABLE_TABS.map(t => `
+      <div class="set-toggle-row">
+        <div class="set-row-body"><div class="set-row-title">${t.label}</div></div>
+        ${sw(!hidden.includes(t.view), `toggleTabVisible('${t.view}')`)}
+      </div>`).join('') +
+    `</div>
+    <div style="margin-top:24px"><button class="btn-add-client" onclick="openSetup()"><i class="fa-solid fa-wand-magic-sparkles"></i> Re-run setup wizard</button></div>`;
+  cont.innerHTML = html;
+  if (src.mainJob) renderMainJob(); // fills #mainJobContent inside Settings
+}
+
+// ── Calendar view (income + expenses by day) ───────────────────
+let calMonth = todayVal().slice(0,7);
+function calShift(delta) {
+  const [y,m] = calMonth.split('-').map(Number);
+  const d = new Date(y, m-1+delta, 1);
+  calMonth = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  renderCalendar();
+}
+function renderCalendar() {
+  const cont = document.getElementById('calendarContent');
+  if (!cont) return;
+  const [yr, mo] = calMonth.split('-').map(Number);
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const firstDow = (new Date(yr, mo-1, 1).getDay() + 6) % 7; // Mon=0 … Sun=6
+  const today = todayVal();
+  // aggregate per day
+  const inc = {}, exp = {};
+  state.income.forEach(e => { const d = (e.date||'').slice(0,10); if (d.startsWith(calMonth)) inc[d] = (inc[d]||0) + (e.amount||0); });
+  state.expenses.forEach(e => { const d = (e.date||'').slice(0,10); if (d.startsWith(calMonth)) exp[d] = (exp[d]||0) + (e.amount||0); });
+  const monthInc = Object.values(inc).reduce((s,v)=>s+v,0);
+  const monthExp = Object.values(exp).reduce((s,v)=>s+v,0);
+
+  const dow = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  let cells = '';
+  for (let i=0;i<firstDow;i++) cells += `<div class="cal-cell cal-empty"></div>`;
+  for (let day=1; day<=daysInMonth; day++) {
+    const ds = calMonth + '-' + String(day).padStart(2,'0');
+    const i = inc[ds]||0, x = exp[ds]||0;
+    cells += `<div class="cal-cell${ds===today?' cal-today':''}${(i||x)?' cal-has':''}" onclick="calOpenDay('${ds}')">
+      <div class="cal-daynum">${day}</div>
+      <div class="cal-amts">
+        ${i?`<span class="cal-inc">+${fmtShort(i)}</span>`:''}
+        ${x?`<span class="cal-exp">−${fmtShort(x)}</span>`:''}
+      </div>
+    </div>`;
+  }
+  cont.innerHTML = `
+    <div class="cal-head">
+      <button class="cal-nav" onclick="calShift(-1)"><i class="fa-solid fa-chevron-left"></i></button>
+      <div class="cal-month">${monthLabel(calMonth)}</div>
+      <button class="cal-nav" onclick="calShift(1)"><i class="fa-solid fa-chevron-right"></i></button>
+    </div>
+    <div class="cal-summary">
+      <span class="cal-sum-inc">Income ${fmt(monthInc)}</span>
+      <span class="cal-sum-exp">Expenses ${fmt(monthExp)}</span>
+      <span class="cal-sum-net">Net ${fmt(monthInc-monthExp)}</span>
+    </div>
+    <div class="cal-grid cal-dows">${dow}</div>
+    <div class="cal-grid cal-days">${cells}</div>
+    <div id="calDayPanel"></div>`;
+}
+function fmtShort(n) {
+  const v = Math.abs(Number(n)||0);
+  if (v >= 1000) return '€' + (v/1000).toFixed(v%1000===0?0:1) + 'k';
+  return '€' + Math.round(v);
+}
+function calOpenDay(ds) {
+  const incE = state.income.filter(e => (e.date||'').slice(0,10) === ds);
+  const expE = state.expenses.filter(e => (e.date||'').slice(0,10) === ds);
+  const panel = document.getElementById('calDayPanel');
+  if (!panel) return;
+  if (!incE.length && !expE.length) { panel.innerHTML = `<div class="cal-day-panel"><div class="cal-day-title">${toDateStr(ds)} ${ds.slice(0,4)}</div><div class="ov-empty">Nothing on this day</div></div>`; return; }
+  const row = (name, amt, cls, sub) => `<div class="cal-day-row"><span class="cal-day-name">${name}${sub?` <em style="opacity:.6">· ${sub}</em>`:''}</span><span class="cal-day-amt ${cls}">${fmt(amt)}</span></div>`;
+  let html = `<div class="cal-day-panel"><div class="cal-day-title">${toDateStr(ds)} ${ds.slice(0,4)}</div>`;
+  incE.forEach(e => { const c = clientById(e.clientId); html += row((c?.name||'Income')+(e.service?' — '+e.service:''), e.amount, 'green', e.status); });
+  expE.forEach(e => { html += row((e.vendor||e.category||'Expense'), -e.amount, 'red'); });
+  html += `</div>`;
+  panel.innerHTML = html;
+}
 
 // ── Main Job salary ────────────────────────────────────────────
 function getMainJobClient() { return state.clients.find(c => c.id === MAINJOB_CLIENT_ID); }
