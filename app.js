@@ -985,10 +985,13 @@ function saveClientEdit() {
   if (!name) { showToast('Please enter a client name','error'); return; }
   const c = clientById(id);
   if (!c) return;
+  const typeChanged = c.type !== editClientType;
   c.name       = name;
   c.type       = editClientType;
   c.color      = editClientColor;
   c.subclients = editClientType==='Agency' ? editClientSubclients.filter(s=>s.trim()) : [];
+  // Direct↔Agency restructures the QE columns — drop stale QE drafts for this client
+  if (typeChanged) clearQEDraftForClient(id);
   const editPTInv  = document.getElementById('editPayTypeInvoice');
   const editPTCash = document.getElementById('editPayTypeCash');
   if (editPTInv && editPTCash) {
@@ -1578,6 +1581,35 @@ function sheetError(fieldId, msg) {
   bar._t = setTimeout(() => { bar.style.display = 'none'; }, 3500);
 }
 
+// Drop the Quick Entry draft cache for a cell (client+date, any sub/type) so an
+// edit/status-change made OUTSIDE QE is never overwritten by a stale draft when QE
+// re-opens. This is what was corrupting entries after editing them in the Income tab.
+function clearQEDraftForCell(clientId, date) {
+  if (!clientId || !date) return;
+  let changed = false;
+  Object.keys(qeGridData).forEach(k => {
+    const p = k.split('|'); // type|clientId|date|sub
+    if (p[1] === clientId && p[2] === date) { delete qeGridData[k]; changed = true; }
+  });
+  // Also blank any LIVE grid inputs for this cell — the QE table DOM persists while
+  // hidden, and captureQEGridData would otherwise re-capture the stale displayed
+  // value back into the draft on the next visit (that was the real corruption).
+  try {
+    document.querySelectorAll(`#qeSpreadsheet input[data-client="${clientId}"][data-date="${date}"]`)
+      .forEach(inp => { inp.value = ''; });
+  } catch(_) {}
+  if (changed) idbSet(QE_GRID_KEY, qeGridData);
+}
+function clearQEDraftForClient(clientId) {
+  if (!clientId) return;
+  let changed = false;
+  Object.keys(qeGridData).forEach(k => { if (k.split('|')[1] === clientId) { delete qeGridData[k]; changed = true; } });
+  try {
+    document.querySelectorAll(`#qeSpreadsheet input[data-client="${clientId}"]`).forEach(inp => { inp.value = ''; });
+  } catch(_) {}
+  if (changed) idbSet(QE_GRID_KEY, qeGridData);
+}
+
 function saveIncome() {
   // Blur any focused input/textarea so values are committed (don't blur buttons)
   try {
@@ -1623,6 +1655,7 @@ function saveIncome() {
           )?.id;
           state.income = state.income.filter(e => e.id !== editingEntryId && e.id !== companionId);
         }
+        clearQEDraftForCell(oldEntry.clientId, oldEntry.date);
       }
       editingEntryId = null; editingEntryType = null;
     } else {
@@ -1671,6 +1704,9 @@ function saveIncome() {
       // mark it so it doesn't become the template for future auto-generation
       if (incRecurring && prev.recurring && (prev.amount !== amount)) updated.oneOff = true;
       state.income[idx] = updated;
+      // Invalidate any stale Quick Entry draft for this cell (old + new location)
+      clearQEDraftForCell(prev.clientId, prev.date);
+      if (clientId !== prev.clientId || rawDate !== prev.date) clearQEDraftForCell(clientId, rawDate);
     }
     editingEntryId = null; editingEntryType = null;
     saveData();
@@ -3371,6 +3407,7 @@ function bulkMarkIncome(status) {
       e.statusUpdatedAt = now;
       if (status === 'Paid') e.paidDate = now;
       else delete e.paidDate;
+      clearQEDraftForCell(e.clientId, e.date); // keep QE in sync with the new status
     }
   });
   saveData();
@@ -5360,25 +5397,31 @@ let _obIsSetup = false;
 
 // Show or hide nav items per profile: income-source items (Clients / Side Hustles)
 // and user-hidden tabs (chosen in Settings). Dashboard & Settings are always reachable.
-function applyProfileNav() {
+// Tabs that only make sense when "Freelance clients" is enabled (client-centric)
+const CLIENT_DEPENDENT_TABS = ['services', 'quickentry'];
+function tabAllowed(v) {
   const src = (state.profile && state.profile.sources) ? state.profile.sources : { clients:true };
   const hidden = profileHiddenTabs();
+  if (CLIENT_DEPENDENT_TABS.includes(v) && !src.clients) return false; // needs freelance clients
+  if (hidden.includes(v)) return false;                                // user-hidden
+  return true;
+}
+function applyProfileNav() {
+  const src = (state.profile && state.profile.sources) ? state.profile.sources : { clients:true };
   document.querySelectorAll('.nav-item[data-view]').forEach(el => {
     const v = el.dataset.view;
-    let show = true;
-    if (el.dataset.src) show = !!src[el.dataset.src];      // source-driven items
-    else if (hidden.includes(v)) show = false;              // user-hidden tabs
+    let show;
+    if (el.dataset.src) show = !!src[el.dataset.src];  // source-driven items (Clients / Side Hustles)
+    else show = tabAllowed(v);                          // standard tabs (+ client-dependent rule)
     el.style.display = show ? '' : 'none';
   });
-  // also reflect on the bottom (mobile) nav
   document.querySelectorAll('.bottom-nav-item[data-view]').forEach(el => {
-    const v = el.dataset.view;
-    el.style.display = (hidden.includes(v)) ? 'none' : '';
+    el.style.display = tabAllowed(el.dataset.view) ? '' : 'none';
   });
   // If the current view just got hidden, fall back to Dashboard
   const map = { clients:'clients', sidehustles:'sideHustles' };
   const srcHidden = map[currentView] && !src[map[currentView]];
-  const tabHidden = hidden.includes(currentView);
+  const tabHidden = !tabAllowed(currentView) && !['dashboard','settings','clients','sidehustles'].includes(currentView);
   if ((srcHidden || tabHidden) && currentView !== 'settings') navigate('dashboard');
 }
 
@@ -5494,10 +5537,12 @@ function renderSettings() {
   if (src.mainJob) {
     html += `<div class="section-title" style="margin-top:26px">Main job salary</div><div id="mainJobContent"></div>`;
   }
+  // Client-centric tabs (Services / Quick Entry) only appear here when freelance clients are on
+  const tabsToShow = TOGGLEABLE_TABS.filter(t => !(CLIENT_DEPENDENT_TABS.includes(t.view) && !src.clients));
   html += `<div class="section-title" style="margin-top:26px">Visible tabs</div>
-    <p class="monthly-help" style="margin-bottom:12px">Choose what shows in the left menu. Dashboard & Settings are always available.</p>
+    <p class="monthly-help" style="margin-bottom:12px">Choose what shows in the left menu. Dashboard & Settings are always available.${!src.clients?' Services & Quick Entry appear once you enable Freelance clients.':''}</p>
     <div class="set-card">` +
-    TOGGLEABLE_TABS.map(t => `
+    tabsToShow.map(t => `
       <div class="set-toggle-row">
         <div class="set-row-body"><div class="set-row-title">${t.label}</div></div>
         ${sw(!hidden.includes(t.view), `toggleTabVisible('${t.view}')`)}
