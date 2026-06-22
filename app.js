@@ -2777,7 +2777,18 @@ function saveQEGrid() {
       }
     });
   });
-  // Delete entries for cells that are now zero/empty (user cleared them)
+  // Delete entries for cells the user cleared. A cell with an empty SENTINEL in the
+  // draft (qeGridData[key] === '') was explicitly cleared → delete it even if Paid.
+  // A cell that's just empty (no sentinel) only removes Pending entries (safety).
+  // Deletions are tombstoned so they propagate and never resurrect from another device.
+  let removedCount = 0;
+  const removeEntry = (cid2, ds, sub2, cleared) => {
+    state.income = state.income.filter(e => {
+      const match = e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && (cleared || e.status!=='Paid');
+      if (match) { addTombstone(e.id); removedCount++; }
+      return !match;
+    });
+  };
   table.querySelectorAll('tbody tr').forEach(tr => {
     const ds = tr.dataset.date;
     const done3 = new Set();
@@ -2789,32 +2800,30 @@ function saveQEGrid() {
         subqtys2.forEach(sq2 => {
           if ((parseFloat(sq2.value)||0) <= 0) {
             const sub2 = sq2.dataset.sub;
-            // Only delete PENDING entries — never auto-delete Paid entries from QE
-            state.income = state.income.filter(e =>
-              !(e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && e.status!=='Paid')
-            );
+            const cleared = qeGridData['subqty|'+cid2+'|'+ds+'|'+sub2] === '';
+            removeEntry(cid2, ds, sub2, cleared);
           }
         });
       } else {
         const qi2 = tr.querySelector('[data-client="'+cid2+'"][data-type="qty"]');
         if ((parseFloat(qi2?.value)||0) <= 0 && (parseFloat(priceInp.value)||0) <= 0) {
-          // Only delete PENDING entries — never auto-delete Paid entries from QE
-          state.income = state.income.filter(e =>
-            !(e.clientId===cid2 && e.date===ds && (e.subClient||'')==='' && e.status!=='Paid')
-          );
+          const cleared = qeGridData['qty|'+cid2+'|'+ds+'|'] === '' || qeGridData['price|'+cid2+'|'+ds+'|'] === '';
+          removeEntry(cid2, ds, '', cleared);
         }
       }
     });
   });
 
-  if (!savedCount) { showToast('No entries to save','error'); return; }
+  if (!savedCount && !removedCount) { showToast('No entries to save','error'); return; }
   try {
-    saveData();
+    saveData(); // persists added/updated entries AND the deletions+tombstones
   } catch(e) {
     showPersistentError('❌ Could not save QE — storage full. Export data first then clear space.');
     return;
   }
-  showToast(savedCount+' entries saved — '+fmt(savedTotal));
+  showToast(savedCount
+    ? (savedCount+' entries saved — '+fmt(savedTotal) + (removedCount?` · ${removedCount} removed`:''))
+    : `${removedCount} entr${removedCount===1?'y':'ies'} removed`);
   // Keep all values visible — do NOT clear the grid
 }
 
