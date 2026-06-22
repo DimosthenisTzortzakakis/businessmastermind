@@ -3950,3 +3950,21 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 .set-account-email { font-size: 13.5px; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
 .set-account .set-action-btn { background: transparent; }
+
+/* ============================================================
+   Pre-auth screens are ALWAYS dark (branded), independent of the
+   user's chosen content theme — fixes dark-text-on-dark-card in
+   the Light theme login. Re-declaring the palette vars on these
+   containers makes every child use the dark values.
+   ============================================================ */
+.login-screen, .landing-screen, .onboarding-screen, #guideScreen {
+  --bg: #040410;
+  --bg-card: rgba(255,255,255,0.07);
+  --bg-card2: rgba(255,255,255,0.05);
+  --surface-solid: #16161f;
+  --border: rgba(255,255,255,0.14);
+  --text: #f1f5f9;
+  --text-muted: #aab4c4;
+  --text-faint: #8a9bb3;
+  --shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12);
+}
