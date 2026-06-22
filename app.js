@@ -5492,10 +5492,29 @@ function obFinish() {
     showToast('✓ Sections updated');
   } else {
     navigate('dashboard');
-    showToast('✓ All set! Welcome to Mastermind');
+    showGuide(); // first-run walkthrough
   }
 }
 function openSetup() { closeMobileSidebar(); showOnboarding(true); }
+
+// ── First-run quick-start guide ────────────────────────────────
+const GUIDE_STEPS = [
+  { icon:'fa-plus',          color:'var(--accent)',     title:'Add entries fast',  text:'Tap “+ Add Entry” (top-right) to log income or an expense in seconds.' },
+  { icon:'fa-table-cells',   color:'var(--green)',      title:'Quick Entry grid',  text:'A spreadsheet to log lots of days & clients at once — great for busy weeks.' },
+  { icon:'fa-calendar-days', color:'var(--blue)',       title:'Calendar',          text:'See every income & expense by day, with monthly totals.' },
+  { icon:'fa-circle-check',  color:'var(--amber)',      title:'Paid / Pending',    text:'Tap an entry to mark it Paid or Pending and track what you’re still owed.' },
+  { icon:'fa-gear',          color:'var(--text-muted)', title:'Settings',          text:'Turn sections on/off, set your salary, change theme, back up your data.' },
+];
+function renderGuideSteps() {
+  const el = document.getElementById('guideSteps'); if (!el) return;
+  el.innerHTML = GUIDE_STEPS.map(s => `
+    <div class="guide-step">
+      <div class="guide-step-icon" style="color:${s.color}"><i class="fa-solid ${s.icon}"></i></div>
+      <div class="guide-step-body"><div class="guide-step-title">${s.title}</div><div class="guide-step-text">${s.text}</div></div>
+    </div>`).join('');
+}
+function showGuide()  { renderGuideSteps(); closeMobileSidebar(); document.getElementById('guideScreen').classList.remove('hidden'); }
+function closeGuide() { document.getElementById('guideScreen').classList.add('hidden'); }
 
 // ── Settings view (sources, salary, tab visibility) ────────────
 function toggleSource(key) {
@@ -5547,8 +5566,31 @@ function renderSettings() {
         <div class="set-row-body"><div class="set-row-title">${t.label}</div></div>
         ${sw(!hidden.includes(t.view), `toggleTabVisible('${t.view}')`)}
       </div>`).join('') +
-    `</div>
-    <div style="margin-top:24px"><button class="btn-add-client" onclick="openSetup()"><i class="fa-solid fa-wand-magic-sparkles"></i> Re-run setup wizard</button></div>`;
+    `</div>`;
+  // Appearance
+  html += `<div class="section-title" style="margin-top:26px">Appearance</div>
+    <div class="set-card" style="padding:14px"><div class="set-theme-row">` +
+    THEMES.map(t => `<button class="set-theme-swatch ${currentTheme()===t.id?'active':''}" onclick="applyTheme('${t.id}');renderSettings()">
+        <span class="sts-chip" style="background:${t.bg}"><span style="background:${t.accent}"></span></span>${t.name}</button>`).join('') +
+    `</div></div>`;
+  // Data & backup
+  html += `<div class="section-title" style="margin-top:26px">Data &amp; backup</div>
+    <div class="set-actions">
+      <button class="set-action-btn" onclick="openSyncModal()"><i class="fa-solid fa-cloud"></i> Cloud Sync</button>
+      <button class="set-action-btn" onclick="exportAllToExcel()"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
+      <button class="set-action-btn" onclick="exportData()"><i class="fa-solid fa-download"></i> Backup (JSON)</button>
+      <button class="set-action-btn" onclick="document.getElementById('importFile').click()"><i class="fa-solid fa-upload"></i> Restore (JSON)</button>
+    </div>`;
+  // Help & account
+  html += `<div class="section-title" style="margin-top:26px">Help &amp; account</div>
+    <div class="set-actions">
+      <button class="set-action-btn" onclick="showGuide()"><i class="fa-solid fa-circle-question"></i> Quick-start guide</button>
+      <button class="set-action-btn" onclick="openSetup()"><i class="fa-solid fa-wand-magic-sparkles"></i> Re-run setup</button>
+    </div>`;
+  if (typeof authEmail !== 'undefined' && authEmail) {
+    html += `<div class="set-account"><span class="set-account-email"><i class="fa-solid fa-user"></i> ${authEmail}</span>
+      <button class="set-action-btn danger" onclick="doSignOut()"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out</button></div>`;
+  }
   cont.innerHTML = html;
   if (src.mainJob) renderMainJob(); // fills #mainJobContent inside Settings
 }
