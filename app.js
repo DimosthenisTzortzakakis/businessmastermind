@@ -2219,10 +2219,33 @@ function renderQEIncome(cont) {
   const daysInMonth = new Date(yr, mo, 0).getDate();
   const today = todayVal();
 
-  if (!qeGridSelectedClients.length && state.clients.length)
-    qeGridSelectedClients = state.clients.slice(0, 6).map(c=>c.id);
+  // QE shows clients only (never the Main Job salary pseudo-client)
+  const qeEligible = state.clients.filter(c => clientKind(c) !== 'mainjob');
+  if (!qeGridSelectedClients.length && qeEligible.length)
+    qeGridSelectedClients = qeEligible.slice(0, 6).map(c=>c.id);
 
-  const selCols = state.clients.filter(c=>qeGridSelectedClients.includes(c.id));
+  // Auto-include any client that has income THIS month, so entries added via the
+  // normal "+ Add Entry" are never hidden just because the column wasn't selected.
+  let _qeChanged = false;
+  state.income.forEach(e => {
+    if (e.date && e.date.startsWith(qeGridMonth)) {
+      const c = clientById(e.clientId);
+      if (!c || clientKind(c) === 'mainjob') return;
+      if (!qeGridSelectedClients.includes(c.id)) {
+        qeGridSelectedClients.push(c.id);
+        _qeChanged = true;
+      }
+      // Show the entry's real service in the column header (so titles aren't blank/
+      // wrong) when no explicit column service was set for that client/subclient.
+      if (e.service) {
+        const key = e.subClient ? (c.id + '|' + e.subClient) : c.id;
+        if (!qeClientServices[key]) { qeClientServices[key] = e.service; _qeChanged = true; }
+      }
+    }
+  });
+  if (_qeChanged) saveUIState();
+
+  const selCols = qeEligible.filter(c=>qeGridSelectedClients.includes(c.id));
 
   const moOpts = (()=>{
     const ms = allMonths();
@@ -2230,7 +2253,7 @@ function renderQEIncome(cont) {
     return ms.map(m=>`<option value="${m}" ${m===qeGridMonth?'selected':''}>${monthLabel(m)}</option>`).join('');
   })();
 
-  const clientToggles = state.clients.map(c=>`
+  const clientToggles = qeEligible.map(c=>`
     <label class="qe-client-toggle ${qeGridSelectedClients.includes(c.id)?'active':''}">
       <input type="checkbox" style="display:none" ${qeGridSelectedClients.includes(c.id)?'checked':''}
         onchange="toggleQEGridClient('${c.id}',this.checked)" />
@@ -4805,6 +4828,39 @@ function scheduleAutoPush() {
   _autoPushTimer = setTimeout(() => autoPush(true), 0);
 }
 
+// Merge the current cloud blob into local state BEFORE pushing, so a push can
+// never overwrite another device's deletes/edits/additions. This is what stops
+// deleted entries from resurrecting: the other device's tombstones are unioned
+// in (so the deleted id is excluded) and survive into the pushed payload.
+function applyCloudBeforePush(p) {
+  if (!p || !Array.isArray(p.clients)) return;
+  const allDeleted = new Set([...(state.deletedIds||[]), ...(p.deletedIds||[])]);
+  const cloudInc = p.income   || [];
+  const cloudExp = p.expenses || [];
+  const localIncMap = new Map((state.income   || []).map(e => [e.id, e]));
+  const localExpMap = new Map((state.expenses || []).map(e => [e.id, e]));
+  const cloudIncIds = new Set(cloudInc.map(e => e.id));
+  const cloudExpIds = new Set(cloudExp.map(e => e.id));
+  const mergedInc = cloudInc.filter(ce => !allDeleted.has(ce.id))
+    .map(ce => { const le = localIncMap.get(ce.id); return le ? mergeIncomeEntry(le, ce) : ce; });
+  const mergedExp = cloudExp.filter(ce => !allDeleted.has(ce.id))
+    .map(ce => { const le = localExpMap.get(ce.id); if (!le) return ce;
+      const a = le.updatedAt||le.createdAt||0, b = ce.updatedAt||ce.createdAt||0; return a > b ? le : ce; });
+  const localOnlyInc = (state.income   || []).filter(e => !cloudIncIds.has(e.id) && !allDeleted.has(e.id));
+  const localOnlyExp = (state.expenses || []).filter(e => !cloudExpIds.has(e.id) && !allDeleted.has(e.id));
+  state.income   = [...mergedInc, ...localOnlyInc];
+  state.expenses = [...mergedExp, ...localOnlyExp];
+  state.deletedIds = [...allDeleted];
+  state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
+  state.monthlyStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
+  // Clients/services: union (keep local, add cloud-only) — never drop the other device's additions
+  const localClientIds = new Set((state.clients || []).map(c => c.id));
+  (p.clients || []).forEach(cc => { if (!localClientIds.has(cc.id)) state.clients.push(cc); });
+  state.services = [...new Set([...(state.services||[]), ...(p.services||[])])];
+  // Profile: we're pushing local intent, so keep local; adopt cloud only if local has none
+  if (!state.profile && p.profile) state.profile = p.profile;
+}
+
 async function autoPush(silent, keepalive = false) {
   if (!syncBlobId || !fbUrl) return;
   if (_isSyncing && !keepalive) {
@@ -4815,6 +4871,21 @@ async function autoPush(silent, keepalive = false) {
   _isSyncing = true;
   setSyncIndicator('pushing');
   try {
+    // Pull-merge-before-push (skipped on keepalive/unload where we can't await)
+    let _mergeChanged = false;
+    if (!keepalive) {
+      const beforeSig = (state.income||[]).length + '/' + (state.expenses||[]).length;
+      try {
+        const gres = await fbFetch(syncBlobId);
+        if (gres.ok) { const cloud = await gres.json(); applyCloudBeforePush(cloud); }
+      } catch(_) { /* GET failed — fall through to a plain push */ }
+      const afterSig = (state.income||[]).length + '/' + (state.expenses||[]).length;
+      _mergeChanged = beforeSig !== afterSig;
+    }
+    // If the merge removed/added entries (e.g. another device's delete), reflect it now
+    if (_mergeChanged && !activeSheet) renderView(currentView);
+    state.lastModified = Date.now();
+    if (!keepalive) idbSet(STORAGE_KEY, state); // persist the merge locally
     const body = JSON.stringify(state);
     const res = await fbFetch(syncBlobId, {
       method: 'PUT',
