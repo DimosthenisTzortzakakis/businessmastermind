@@ -6090,32 +6090,35 @@ async function handleGoogleRedirect() {
 async function doGoogleLogin() {
   const btn = document.getElementById('loginGoogleBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+  const GOOGLE_BTN_HTML = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> Continue with Google';
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   try {
-    // Persist the session in localStorage so it survives the redirect round-trip
     try { await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch(_) {}
     const provider = new firebase.auth.GoogleAuthProvider();
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-      sessionStorage.setItem('bm_google_redirect', '1');
-      await firebase.auth().signInWithRedirect(provider);
-      return; // page navigates away; handleGoogleRedirect() finishes on return
-    }
+    // Use the POPUP flow on every platform. On iOS Safari the redirect flow loses
+    // its session to storage partitioning (auth domain is *.firebaseapp.com) and
+    // bounced the user straight back to the login screen — an endless loop with no
+    // error. The popup stays in the same browsing context and avoids that.
     const result = await firebase.auth().signInWithPopup(provider);
     await finishFirebaseLogin(result.user);
   } catch(e) {
-    // Popup blocked / closed / not supported → fall back to the full-page redirect
-    // flow (this is the most common reason Google sign-in "doesn't connect").
     const code = e && e.code ? e.code : '';
     const popupFailed = /popup-blocked|popup-closed-by-user|cancelled-popup-request|operation-not-supported|web-storage-unsupported|internal-error/.test(code);
-    if (popupFailed) {
+    // Desktop only: fall back to redirect if the popup was blocked. On mobile the
+    // redirect loops, so show a clear message instead of bouncing the user.
+    if (popupFailed && !isMobile) {
       try {
         sessionStorage.setItem('bm_google_redirect', '1');
         await firebase.auth().signInWithRedirect(provider);
-        return; // page navigates away; handleGoogleRedirect() finishes on return
+        return;
       } catch(e2) { /* fall through to error display */ }
     }
-    setLoginError((e && e.message) || 'Google sign-in failed');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg> Continue with Google'; }
+    setLoginError(
+      popupFailed && isMobile
+        ? 'Could not open the Google sign-in window — allow pop-ups for this site, or sign up with email below.'
+        : ((e && e.message) || 'Google sign-in failed')
+    );
+    if (btn) { btn.disabled = false; btn.innerHTML = GOOGLE_BTN_HTML; }
   }
 }
 
