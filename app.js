@@ -2248,11 +2248,12 @@ function restoreQEGridData() {
     }
   });
 
-  // Recalculate all totals once
+  // Recalculate all totals once — skipCol=true so the heavy updateQEColTotals runs
+  // a single time after the loop (not once per cell, which was O(N²)).
   const seen = new Set();
   table.querySelectorAll('[data-type="subqty"],[data-type="qty"]').forEach(inp => {
     const k = inp.dataset.client+'|'+inp.dataset.date;
-    if (!seen.has(k)) { seen.add(k); updateQEClientTotal(inp); }
+    if (!seen.has(k)) { seen.add(k); updateQEClientTotal(inp, true); }
   });
   updateQEColTotals();
   // Color the day total cells based on saved entry status
@@ -2569,10 +2570,9 @@ function applyQETotalColor(cell, status) {
              : 'Tap to toggle status';
 }
 
-function updateQEClientTotal(inp) {
+function updateQEClientTotal(inp, skipCol) {
   // Record just this cell + persist on idle (NOT a full grid scan + IDB write per keystroke)
-  qeCaptureInput(inp);
-  scheduleQEPersist();
+  if (!skipCol) { qeCaptureInput(inp); scheduleQEPersist(); } // skipCol = bulk recompute during render
   const cid = inp.dataset.client;
   const tr = inp.closest('tr');
   const sharedPrice = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="price"]')?.value) || 0;
@@ -2618,14 +2618,23 @@ function updateQEClientTotal(inp) {
     dt.textContent = dayTotal > 0 ? fmt(dayTotal) : '—';
     applyQETotalColor(dt, getQERowStatus(dateStr));
   }
-  updateQEColTotals();
+  if (!skipCol) updateQEColTotals();
 }
 
 function updateQEColTotals() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
-  const service = (qeGridService||'').trim();
   let grand = 0;
+  // Precompute (ONE pass) which clients have a non-empty numeric draft, instead of
+  // scanning the whole draft per client — that O(clients × draftSize) was the hang.
+  const draftClients = new Set();
+  for (const k in qeGridData) {
+    if (qeGridData[k] === '') continue;
+    const t = k.slice(0, k.indexOf('|'));
+    if (t === 'price' || t === 'qty' || t === 'subqty' || t === 'subprice') {
+      draftClients.add(k.split('|')[1]);
+    }
+  }
   table.querySelectorAll('.qe-tf-coltotal').forEach(foot=>{
     const cid = foot.dataset.client;
     let col = 0;
@@ -2634,11 +2643,7 @@ function updateQEColTotals() {
     grand += col;
     // Color by payment status — orange if any pending, any draft, or no saved status yet
     const clientStatus = getQEClientStatus(cid);
-    const hasDraftForClient = Object.keys(qeGridData).some(k => {
-      const p = k.split('|');
-      return ['price','qty','subqty','subprice'].includes(p[0]) &&
-             p[1] === cid && qeGridData[k] !== '';
-    });
+    const hasDraftForClient = draftClients.has(cid);
     if (clientStatus === 'Paid' && !hasDraftForClient) {
       foot.style.color      = 'var(--green)';
       foot.style.fontWeight = '700';
@@ -5784,11 +5789,14 @@ function renderMainJob() {
 async function init() {
   await loadData();
   // One-time cleanup: an earlier bug kept pushing clients into the Quick Entry
-  // column selection every render, bloating the grid and causing heavy lag. Reset
-  // the selection once so the grid starts small (the user re-picks via the toggles).
-  if (!localStorage.getItem('biz_qe_reset_v2')) {
+  // column selection every render, bloating both the column list and the draft
+  // cache and causing heavy lag (an unresponsive grid). Reset both once so the
+  // grid starts small & fast; the user re-picks columns via the toggles.
+  if (!localStorage.getItem('biz_qe_reset_v3')) {
     qeGridSelectedClients = [];
-    try { localStorage.setItem('biz_qe_reset_v2', '1'); } catch(_) {}
+    qeGridData = {};
+    try { idbSet(QE_GRID_KEY, {}); } catch(_) {}
+    try { localStorage.setItem('biz_qe_reset_v3', '1'); } catch(_) {}
     saveUIState();
   }
   // Always start income/expense tabs on current month (override UIState)
