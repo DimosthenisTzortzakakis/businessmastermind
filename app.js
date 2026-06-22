@@ -1602,6 +1602,13 @@ function clearQEDraftForCell(clientId, date) {
   } catch(_) {}
   if (changed) idbSet(QE_GRID_KEY, qeGridData);
 }
+// Make sure a client shows as a Quick Entry column (called when income is added
+// for it), so + Add Entry items appear without forcing EVERY active client.
+function ensureQEClientSelected(clientId) {
+  const c = clientById(clientId);
+  if (!c || clientKind(c) === 'mainjob') return;
+  if (!qeGridSelectedClients.includes(clientId)) { qeGridSelectedClients.push(clientId); saveUIState(); }
+}
 function clearQEDraftForClient(clientId) {
   if (!clientId) return;
   let changed = false;
@@ -1730,6 +1737,7 @@ function saveIncome() {
       return;
     }
     sheetsAdd('income', entry);
+    ensureQEClientSelected(clientId); // so it shows in Quick Entry
     closeAllModals();
     showToast(`✓ Income saved — ${fmt(amount)}`);
     renderView(currentView);
@@ -2295,17 +2303,15 @@ function renderQEIncome(cont) {
   if (!qeGridSelectedClients.length && qeEligible.length)
     qeGridSelectedClients = qeEligible.slice(0, 6).map(c=>c.id);
 
-  // Clients that have income THIS month are shown automatically (so "+ Add Entry"
-  // items are never hidden) — computed per-render as a UNION, WITHOUT permanently
-  // growing qeGridSelectedClients (that compounded the grid size every month).
-  const monthActive = new Set();
+  // Seed each shown column's service from existing entries (so titles aren't blank).
+  // Columns are controlled ONLY by the user's toggles — adding income for a client
+  // auto-selects it (see ensureQEClientSelected), so + Add Entry items still appear,
+  // but the user can freely add/remove columns and the grid stays small & fast.
   let _qeSvcChanged = false;
   state.income.forEach(e => {
     if (!e.date || !e.date.startsWith(qeGridMonth)) return;
     const c = clientById(e.clientId);
-    if (!c || clientKind(c) === 'mainjob') return;
-    monthActive.add(c.id);
-    // Seed the column's service from the entry when none was set (titles not blank)
+    if (!c || clientKind(c) === 'mainjob' || !qeGridSelectedClients.includes(c.id)) return;
     if (e.service) {
       const key = e.subClient ? (c.id + '|' + e.subClient) : c.id;
       if (!qeClientServices[key]) { qeClientServices[key] = e.service; _qeSvcChanged = true; }
@@ -2313,7 +2319,7 @@ function renderQEIncome(cont) {
   });
   if (_qeSvcChanged) saveUIState();
 
-  const selCols = qeEligible.filter(c => qeGridSelectedClients.includes(c.id) || monthActive.has(c.id));
+  const selCols = qeEligible.filter(c => qeGridSelectedClients.includes(c.id));
 
   const moOpts = (()=>{
     const ms = allMonths();
@@ -2699,6 +2705,7 @@ function toggleSidebar() {
 function toggleQEGridClient(id, checked) {
   if (checked) { if (!qeGridSelectedClients.includes(id)) qeGridSelectedClients.push(id); }
   else { qeGridSelectedClients = qeGridSelectedClients.filter(c=>c!==id); }
+  saveUIState(); // persist the user's column choice
   renderQEIncome(document.getElementById('qeContent'));
 }
 
@@ -5776,6 +5783,14 @@ function renderMainJob() {
 
 async function init() {
   await loadData();
+  // One-time cleanup: an earlier bug kept pushing clients into the Quick Entry
+  // column selection every render, bloating the grid and causing heavy lag. Reset
+  // the selection once so the grid starts small (the user re-picks via the toggles).
+  if (!localStorage.getItem('biz_qe_reset_v2')) {
+    qeGridSelectedClients = [];
+    try { localStorage.setItem('biz_qe_reset_v2', '1'); } catch(_) {}
+    saveUIState();
+  }
   // Always start income/expense tabs on current month (override UIState)
   incMonth  = todayVal().slice(0,7);
   expMonth  = todayVal().slice(0,7);
