@@ -2251,20 +2251,7 @@ function restoreQEGridData() {
     const k = inp.dataset.client+'|'+inp.dataset.date;
     if (!seen.has(k)) { seen.add(k); updateQEClientTotal(inp, true); }
   });
-  updateQEColTotals();
-  // Colour day totals + per-client totals straight from saved status (no draft)
-  document.querySelectorAll('.qe-td-total[data-date]').forEach(cell => {
-    applyQETotalColor(cell, getQERowStatus(cell.dataset.date));
-  });
-  document.querySelectorAll('.qe-client-total[data-client][data-date]').forEach(ct => {
-    const cid = ct.dataset.client, ds = ct.dataset.date;
-    const entries = state.income.filter(e => e.clientId===cid && e.date===ds);
-    if (!entries.length) return;
-    const isOrange = entries.some(e=>e.status==='Pending');
-    ct.style.color      = isOrange ? '#f59e0b' : 'var(--green)';
-    ct.style.fontWeight = '700';
-    ct.title = isOrange ? 'Pending — tap to mark Paid' : 'Paid — tap to mark Pending';
-  });
+  qeRecolorAll(); // day totals + per-client cells + column footers, all from state
 }
 
 function reloadQEFromData() {
@@ -2560,8 +2547,7 @@ function toggleQERowStatus(dateStr) {
   const now = Date.now();
   entries.forEach(e => { e.status = newStatus; e.updatedAt = now; e.statusUpdatedAt = now; if (newStatus==='Paid') e.paidDate = now; else delete e.paidDate; });
   saveData();
-  const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
-  if (cell) applyQETotalColor(cell, newStatus);
+  qeRecolorAll(); // recolour the WHOLE grid from state (day's client cells included)
   showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
 }
 
@@ -2576,17 +2562,7 @@ function toggleQEClientDayStatus(cid, dateStr) {
   const nowD = Date.now();
   entries.forEach(e => { e.status = newStatus; e.updatedAt = nowD; e.statusUpdatedAt = nowD; if (newStatus==='Paid') e.paidDate = nowD; else delete e.paidDate; });
   saveData();
-  // Update this client total cell color
-  const ct = document.querySelector('.qe-client-total[data-client="'+cid+'"][data-date="'+dateStr+'"]');
-  if (ct) {
-    ct.style.color      = newStatus === 'Paid' ? 'var(--green)' : '#f59e0b';
-    ct.style.fontWeight = '700';
-    ct.title = newStatus === 'Paid' ? 'Paid — tap to mark Pending' : 'Pending — tap to mark Paid';
-  }
-  // Update day total
-  const dt = document.querySelector('.qe-td-total[data-date="'+dateStr+'"]');
-  if (dt) applyQETotalColor(dt, getQERowStatus(dateStr));
-  updateQEColTotals();
+  qeRecolorAll(); // recolour the WHOLE grid from state — no partial/stale patching
   showToast(newStatus === 'Paid' ? '✓ Marked as Paid' : '⏳ Marked as Pending');
 }
 
@@ -2610,13 +2586,7 @@ function toggleQEClientStatus(cid) {
   const nowC = Date.now();
   entries.forEach(e => { e.status = newStatus; e.updatedAt = nowC; e.statusUpdatedAt = nowC; if (newStatus==='Paid') e.paidDate = nowC; else delete e.paidDate; });
   saveData();
-  // Refresh all day-total colors for the affected dates
-  const affectedDates = new Set(entries.map(e => e.date));
-  affectedDates.forEach(dateStr => {
-    const cell = document.querySelector('.qe-td-total[data-date="' + dateStr + '"]');
-    if (cell) applyQETotalColor(cell, getQERowStatus(dateStr));
-  });
-  updateQEColTotals();
+  qeRecolorAll(); // recolour the WHOLE grid — every day cell for this client included
   showToast(newStatus === 'Paid' ? '✓ All entries marked Paid' : '⏳ All entries marked Pending');
 }
 
@@ -2630,6 +2600,25 @@ function applyQETotalColor(cell, status) {
   cell.title = status === 'Paid' ? 'All paid — tap to mark Pending'
              : status === 'Pending' ? 'Has pending — tap to mark Paid'
              : 'Tap to toggle status';
+}
+
+// THE authoritative QE colourer — recomputes EVERY status colour straight from
+// state.income (day totals, per-client-day cells, column footers). Called on
+// render AND after every status toggle, so a colour can never go stale / diverge
+// from the real status ("orange but actually Paid"). Single source of truth.
+function qeRecolorAll() {
+  document.querySelectorAll('.qe-td-total[data-date]').forEach(cell => {
+    applyQETotalColor(cell, getQERowStatus(cell.dataset.date));
+  });
+  document.querySelectorAll('.qe-client-total[data-client][data-date]').forEach(ct => {
+    const entries = state.income.filter(e => e.clientId===ct.dataset.client && e.date===ct.dataset.date);
+    if (!entries.length) { ct.style.color=''; ct.style.fontWeight=''; ct.title=''; return; }
+    const isOrange = entries.some(e => e.status === 'Pending');
+    ct.style.color      = isOrange ? '#f59e0b' : 'var(--green)';
+    ct.style.fontWeight = '700';
+    ct.title = isOrange ? 'Pending — tap to mark Paid' : 'Paid — tap to mark Pending';
+  });
+  updateQEColTotals(); // column footers
 }
 
 function updateQEClientTotal(inp, skipCol) {
