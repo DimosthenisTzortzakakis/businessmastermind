@@ -362,7 +362,12 @@ function deduplicateIncome() {
     // Skip split-payment entries — they intentionally share clientId+date+subClient
     // but differ by paymentType (invoice vs cash). Deduping them would delete the cash half.
     if (e.splitGroupId) return;
-    const key = (e.clientId||'') + '|' + (e.date||'') + '|' + (e.subClient||'');
+    // Key on the FULL content, not just client+date+sub — otherwise two legitimately
+    // different gigs for the same client on the same day (e.g. a €100 morning shoot and
+    // a €200 evening shoot) would be treated as duplicates and one silently deleted.
+    // Only entries identical in every meaningful field are a true (recurring/race) dupe.
+    const key = [e.clientId||'', e.date||'', e.subClient||'', e.amount||0,
+      e.qty??'', e.unitPrice??'', e.service||'', e.paymentType||'', (e.notes||'').trim()].join('|');
     if (seen.has(key)) {
       const prevIdx = seen.get(key);
       const prev = state.income[prevIdx];
@@ -397,7 +402,7 @@ function deduplicateExpenses() {
 
   state.expenses.forEach((e, i) => {
     if (!e.recurring) return; // only deduplicate recurring entries
-    const key = (e.category||'') + '|' + (e.vendor||'') + '|' + monthKey(e.date||'');
+    const key = (e.category||'') + '|' + (e.vendor||'') + '|' + monthKey(e.date||'') + '|' + (e.amount||0);
     if (seen.has(key)) {
       const prevIdx = seen.get(key);
       // Keep the one with a newer createdAt
@@ -2319,14 +2324,24 @@ function qeWriteCell(cid, ds, sub) {
     sub = '';
   } else { return; }
   const xi = state.income.findIndex(e => e.clientId===cid && e.date===ds && (e.subClient||'')===(sub||'') && !e.splitGroupId);
+  // A split payment occupies this cell (invoice + cash halves). QE must NOT stack a
+  // plain entry on top of it (that inflates income with a phantom) nor delete a half —
+  // splits are edited in the Income form.
+  const hasSplitHere = state.income.some(e => e.clientId===cid && e.date===ds && (e.subClient||'')===(sub||'') && e.splitGroupId);
   const amount = Math.round(qty * effectivePrice * 100) / 100;
   if (qty > 0 && effectivePrice > 0) {
     const service   = getClientService(cid, sub);
     const vatAmount = payType==='invoice' ? amount*VAT_RATE : 0;
     if (xi >= 0) {
-      state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:effectivePrice, notes:note, vatAmount, paymentType:payType, updatedAt:now };
-      if (sharedPrice != null) state.income[xi].sharedPrice = sharedPrice; // status preserved
+      const prev = state.income[xi];
+      const upd = { ...prev, service, amount, qty, unitPrice:effectivePrice, notes:note, vatAmount, paymentType:payType, updatedAt:now };
+      if (sharedPrice != null) upd.sharedPrice = sharedPrice; // status preserved
+      // Editing a recurring entry's amount makes it a one-off override so it doesn't
+      // silently reshape every future month's auto-generated value.
+      if (prev.recurring && prev.amount !== amount) upd.oneOff = true;
+      state.income[xi] = upd;
     } else {
+      if (hasSplitHere) return; // don't create a plain entry over a split payment
       const e = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice,
         vatAmount, paymentType:payType, date:ds, status:qeGridStatus, notes:note,
         createdAt:now, updatedAt:now, statusUpdatedAt:now };
@@ -2334,8 +2349,9 @@ function qeWriteCell(cid, ds, sub) {
       state.income.push(e);
       ensureQEClientSelected(cid);
     }
-  } else if (xi >= 0) {
-    // qty/price no longer valid → the cell was cleared → delete + tombstone
+  } else if (xi >= 0 && !state.income[xi].recurring) {
+    // qty/price cleared → delete + tombstone. Recurring entries are NOT removed via a
+    // QE cell-clear (they would just regenerate next load) — manage them in Monthly.
     addTombstone(state.income[xi].id);
     state.income.splice(xi, 1);
   }
