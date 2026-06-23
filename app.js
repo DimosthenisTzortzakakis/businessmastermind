@@ -3679,6 +3679,7 @@ function renderIncome() {
             <span class="badge ${e.paymentType} mini">${e.paymentType==='invoice'?'INV':'CASH'}</span>
             <span class="badge ${sl} mini">${e.status.slice(0,3).toUpperCase()}</span>
             ${eaInc(e.id)}
+            ${e.notes?`<span class="ec-note" title="${esc(e.notes)}"><i class="fa-solid fa-note-sticky"></i> ${esc(e.notes)}</span>`:''}
           </div>`;
         }).join('');
         const grpIds = grp.map(e=>e.id);
@@ -3727,7 +3728,7 @@ function renderIncome() {
       return `<tr class="xls-row-${sl} ${incBulkMode&&incSelectedIds.has(e.id)?'bulk-selected':''}" data-bulk-id="${e.id}" onclick="${incBulkMode?`toggleSelectIncome('${e.id}',event)`:`openEntryDetail('income','${e.id}')`}">
         <td>${incBulkMode?`<input type="checkbox" class="bulk-cb" data-id="${e.id}" ${incSelectedIds.has(e.id)?'checked':''} onclick="toggleSelectIncome('${e.id}',event)">`:toDateStr(e.date)}</td>
         <td style="color:${c?.color||'var(--text)'}"><strong>${c?.name||'?'}</strong>${e.subClient?`<span class="xls-subclient">${e.subClient}</span>`:''}</td>
-        <td>${e.service}${e.recurring?' <span class="badge monthly mini">MONTHLY</span>':''}</td>
+        <td>${e.service}${e.recurring?' <span class="badge monthly mini">MONTHLY</span>':''}${e.notes?`<span class="xls-note" title="${esc(e.notes)}"><i class="fa-solid fa-note-sticky"></i> ${esc(e.notes)}</span>`:''}</td>
         <td class="xls-num">${fmt(e.amount)}</td>
         <td><span class="badge ${sl} mini">${e.status}</span></td>
         <td class="xls-actions-cell"><div class="entry-actions" onclick="event.stopPropagation()">${eaInc(e.id).replace('<div class="entry-actions" onclick="event.stopPropagation()">','').replace('</div>','')}</div></td>
@@ -5853,10 +5854,26 @@ function calOpenDay(ds) {
   const panel = document.getElementById('calDayPanel');
   if (!panel) return;
   if (!incE.length && !expE.length) { panel.innerHTML = `<div class="cal-day-panel"><div class="cal-day-title">${toDateStr(ds)} ${ds.slice(0,4)}</div><div class="ov-empty">Nothing on this day</div></div>`; return; }
-  const row = (name, amt, cls, sub) => `<div class="cal-day-row"><span class="cal-day-name">${name}${sub?` <em style="opacity:.6">· ${sub}</em>`:''}</span><span class="cal-day-amt ${cls}">${fmt(amt)}</span></div>`;
+  // Rich row: client (+ subclient), then service · note underneath, amount coloured by status
+  const incRow = (e) => {
+    const c = clientById(e.clientId);
+    const stCls = e.status === 'Paid' ? 'green' : 'amber';
+    const sub = e.subClient ? ` <em class="cdr-sub">· ${esc(e.subClient)}</em>` : '';
+    const meta = [e.service, e.notes].filter(Boolean).map(esc).join('  ·  ');
+    return `<div class="cal-day-row cal-day-row-rich" onclick="openEntryDetail('income','${e.id}')">
+      <div class="cdr-main"><span class="cal-day-name">${esc(c?.name||'Income')}${sub}</span>${meta?`<span class="cdr-meta">${meta}</span>`:''}</div>
+      <span class="cal-day-amt ${stCls}">${fmt(e.amount)}</span></div>`;
+  };
+  const expRow = (e) => {
+    const note = e.vendor || e.notes || e.description || '';
+    const meta = [e.category, note].filter(Boolean).map(esc).join('  ·  ');
+    return `<div class="cal-day-row cal-day-row-rich" onclick="openEntryDetail('expense','${e.id}')">
+      <div class="cdr-main"><span class="cal-day-name">${esc(e.category||'Expense')}</span>${note?`<span class="cdr-meta">${esc(note)}</span>`:''}</div>
+      <span class="cal-day-amt red">-${fmt(e.amount)}</span></div>`;
+  };
   let html = `<div class="cal-day-panel"><div class="cal-day-title">${toDateStr(ds)} ${ds.slice(0,4)}</div>`;
-  incE.forEach(e => { const c = clientById(e.clientId); html += row((c?.name||'Income')+(e.service?' — '+e.service:''), e.amount, 'green', e.status); });
-  expE.forEach(e => { html += row((e.vendor||e.category||'Expense'), -e.amount, 'red'); });
+  incE.forEach(e => { html += incRow(e); });
+  expE.forEach(e => { html += expRow(e); });
   html += `</div>`;
   panel.innerHTML = html;
 }
