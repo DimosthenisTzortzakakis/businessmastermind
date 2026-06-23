@@ -803,8 +803,9 @@ function renderSearchResults() {
 
 // ── Navigation ─────────────────────────────────────────────────
 function navigate(view) {
-  // Flush any pending Quick Entry auto-saves before leaving it
+  // Flush any pending Quick Entry auto-saves before leaving it (income + expenses)
   if (currentView === 'quickentry' && typeof qeFlushSave === 'function') qeFlushSave();
+  if (currentView === 'quickentry' && typeof qeExpFlushSave === 'function') qeExpFlushSave();
   currentView = view;
   saveUIState();
   clearSearch();
@@ -2946,34 +2947,102 @@ function initQEExpFromState() {
   }
 }
 
+// ── Expense Quick Entry AUTO-SAVE (no draft, no Save button) ──────
+// Each slot edit writes straight to state.expenses (debounced): create when amount>0,
+// update in place, delete (+tombstone) when cleared. Recurring expenses are protected.
+let _qeExpSaveTimer = null;
+const _qeExpDirtySlots = new Set();
+function qeExpCellEdit(el) {
+  const slotEl = el.closest && el.closest('.qe-exp-slot');
+  if (!slotEl) return;
+  if (el.dataset.type === 'expnote' && !el.value.trim()) { // hide the empty note input again
+    el.style.display = 'none';
+    const pen = el.previousElementSibling;
+    if (pen && pen.classList.contains('qe-note-pen')) pen.style.display = '';
+  }
+  updateQEExpDayTotal(slotEl.dataset.date);
+  _qeExpDirtySlots.add(slotEl);
+  clearTimeout(_qeExpSaveTimer);
+  _qeExpSaveTimer = setTimeout(qeExpFlushSave, 500);
+}
+function qeExpFlushSave() {
+  clearTimeout(_qeExpSaveTimer); _qeExpSaveTimer = null;
+  if (!_qeExpDirtySlots.size) return;
+  let changed = false;
+  _qeExpDirtySlots.forEach(slotEl => { if (slotEl.isConnected && qeExpWriteSlot(slotEl)) changed = true; });
+  _qeExpDirtySlots.clear();
+  if (changed) saveData();
+}
+function qeExpWriteSlot(slotEl) {
+  const ds = slotEl.dataset.date;
+  const catSel  = slotEl.querySelector('[data-type="expcategory"]');
+  const amtInp  = slotEl.querySelector('[data-type="expamount"]');
+  const noteInp = slotEl.querySelector('[data-type="expnote"]');
+  const category = catSel ? catSel.value : '';
+  const amount   = parseFloat(amtInp && amtInp.value) || 0;
+  const note     = ((noteInp && noteInp.value) || '').trim();
+  const entryId  = (amtInp && amtInp.dataset.entryId) || '';
+  const now = Date.now();
+  if (amount > 0) {
+    if (entryId) {
+      const xi = state.expenses.findIndex(e => e.id === entryId);
+      if (xi < 0) return false;
+      const prev = state.expenses[xi];
+      const upd = { ...prev, category, amount, vendor:note, description:note, notes:note, paymentMethod:qeExpPayMethod, updatedAt:now };
+      if (prev.recurring && prev.amount !== amount) upd.oneOff = true; // amount override — keep series intact
+      state.expenses[xi] = upd;
+      return true;
+    }
+    const entry = { id:genId(), category, vendor:note, description:note, amount, vatAmount:0,
+      paymentMethod:qeExpPayMethod, recurring:false, date:ds, notes:note, createdAt:now, updatedAt:now };
+    state.expenses.push(entry);
+    sheetsAdd('expense', entry);
+    if (amtInp) amtInp.dataset.entryId = entry.id;
+    // keep one empty trailing slot available for the next entry
+    const cont = slotEl.parentElement;
+    if (cont && slotEl === cont.lastElementChild) {
+      const si = cont.querySelectorAll('.qe-exp-slot').length;
+      cont.insertAdjacentHTML('beforeend', renderQEExpSlotHTML(ds, {id:'',category:'',amount:'',note:''}, si));
+    }
+    return true;
+  } else if (entryId) {
+    const ex = state.expenses.find(e => e.id === entryId);
+    if (ex && ex.recurring) return false; // don't delete a recurring expense via cell-clear
+    addTombstone(entryId);
+    state.expenses = state.expenses.filter(e => e.id !== entryId);
+    if (amtInp) amtInp.dataset.entryId = '';
+    return true;
+  }
+  return false;
+}
+
 function renderQEExpSlotHTML(ds, slot, si) {
   const catOpts = Object.keys(CATEGORY_ICONS).map(cat=>
     '<option value="'+cat+'" '+(slot.category===cat?'selected':'')+'>'+CATEGORY_ICONS[cat]+' '+cat+'</option>'
   ).join('');
   const hasNote = !!slot.note;
   return '<div class="qe-exp-slot" data-date="'+ds+'" data-slot="'+si+'">'
-    +'<select class="qe-sp-inp qe-exp-cat" data-type="expcategory" onchange="updateQEExpDayTotal(\''+ds+'\')">'
+    +'<select class="qe-sp-inp qe-exp-cat" data-type="expcategory" onchange="qeExpCellEdit(this)">'
       +'<option value="">Cat…</option>'+catOpts+'</select>'
     +'<input class="qe-sp-inp qe-exp-amt" type="number" placeholder="—" min="0" step="0.01"'
       +' value="'+(slot.amount||'')+'" data-type="expamount" data-entry-id="'+(slot.id||'')+'"'
-      +' oninput="updateQEExpDayTotal(\''+ds+'\')" />'
+      +' oninput="qeExpCellEdit(this)" />'
     +'<button class="qe-note-pen" onclick="toggleSubNote(this)" title="Vendor/Note"'
       +' style="'+(hasNote?'display:none':'')+'"><i class="fa-solid fa-pencil"></i></button>'
     +'<input class="qe-sp-inp qe-sp-subnote" type="text" placeholder="vendor / note…"'
       +' value="'+(slot.note||'')+'" data-type="expnote"'
-      +' style="display:'+(hasNote?'block':'none')+'" onblur="qeSubNoteBlur(this)" />'
+      +' style="display:'+(hasNote?'block':'none')+'" onblur="qeExpCellEdit(this)" />'
     +'<button class="qe-exp-remove" onclick="removeQEExpSlot(this)" title="Remove"><i class="fa-solid fa-xmark"></i></button>'
   +'</div>';
 }
 
 function renderQEExpense(cont) {
-  captureQEExpGridData();
+  // No draft cache — render straight from saved expenses; each cell edit auto-saves.
   if (!qeGridMonth) qeGridMonth = todayVal().slice(0,7);
   const [yr,mo] = qeGridMonth.split('-').map(Number);
   const daysInMonth = new Date(yr,mo,0).getDate();
   const today = todayVal();
-
-  initQEExpFromState();
+  _qeExpDirtySlots.clear(); // dropping the old DOM — clear stale dirty-slot references
 
   const moOpts = (()=>{
     const ms = allMonths(); if (!ms.includes(qeGridMonth)) ms.unshift(qeGridMonth);
@@ -2982,7 +3051,10 @@ function renderQEExpense(cont) {
 
   const bodyRows = Array.from({length:daysInMonth},(_,i)=>{
     const day=i+1, ds=qeGridMonth+'-'+String(day).padStart(2,'0'), isToday=ds===today;
-    const slots = [...(qeExpenseGridData[ds]||[]), {id:'',category:'',amount:'',note:''}];
+    const saved = state.expenses.filter(e=>e.date===ds).map(e=>({
+      id:e.id, category:e.category||'', amount:e.amount?String(e.amount):'', note:e.vendor||e.description||e.notes||''
+    }));
+    const slots = [...saved, {id:'',category:'',amount:'',note:''}];
     const slotsHtml = slots.map((s,si)=>renderQEExpSlotHTML(ds,s,si)).join('');
     return '<tr class="qe-sp-row'+(isToday?' qe-today-row':'')+'" data-date="'+ds+'">'
       +'<td class="qe-td-day'+(isToday?' qe-today-day':'')+'">'+day+'</td>'
@@ -3027,7 +3099,7 @@ function renderQEExpense(cont) {
         </tr></tfoot>
       </table>
     </div>
-    <button class="qe-save-grid-btn" onclick="saveQEExpenseGrid()"><i class="fa-solid fa-check"></i> Save All Filled Entries</button>`;
+    <div class="qe-autosave-note"><i class="fa-solid fa-cloud-arrow-up"></i> Everything saves automatically as you type</div>`;
 
   document.querySelectorAll('#qeExpSpreadsheet tbody tr[data-date]').forEach(tr=>updateQEExpDayTotal(tr.dataset.date));
 }
@@ -3054,8 +3126,10 @@ function removeQEExpSlot(btn) {
   const entryId = amtInp?.dataset.entryId;
   const dateStr = slotEl.dataset.date;
   if (entryId) {
+    const ex = state.expenses.find(e=>e.id===entryId);
+    if (ex && ex.recurring) { showToast('Manage recurring expenses in the Monthly tab','error'); return; }
+    addTombstone(entryId); // so the deletion propagates and can't resurrect via sync
     state.expenses = state.expenses.filter(e=>e.id!==entryId);
-    if (qeExpenseGridData[dateStr]) qeExpenseGridData[dateStr] = qeExpenseGridData[dateStr].filter(s=>s.id!==entryId);
     saveData(); showToast('Expense removed');
   }
   slotEl.remove();
