@@ -289,6 +289,24 @@ let chartByClient = null;
 let chartMonthly  = null;
 let chartExpCat   = null;
 
+// Trim + dedupe every subclient name and trim entry subClients. A stray trailing
+// space (e.g. "Other projects ") breaks Quick Entry column↔entry matching and makes
+// real entries look "erased". Run on load AND after every cloud merge (a sync could
+// otherwise re-introduce the space from another device's blob).
+function normalizeSubclients() {
+  (state.clients||[]).forEach(c => {
+    if (!Array.isArray(c.subclients)) return;
+    const seen = new Set(); const out = [];
+    c.subclients.forEach(s => {
+      const t = (typeof s === 'string') ? s.trim() : s;
+      if (t === '') return;
+      if (!seen.has(t)) { seen.add(t); out.push(t); }
+    });
+    c.subclients = out;
+  });
+  (state.income||[]).forEach(e => { if (typeof e.subClient === 'string') e.subClient = e.subClient.trim(); });
+}
+
 // ── Persistence ────────────────────────────────────────────────
 async function loadData() {
   try {
@@ -315,12 +333,8 @@ async function loadData() {
     if (!c.subclientPaymentTypes) c.subclientPaymentTypes = {};
     if (!Array.isArray(c.subclients)) c.subclients = []; // backfill so edit never crashes
     if (!c.kind) c.kind = 'client'; // backfill source kind
-    // Trim subclient names — a stray trailing space (e.g. "Other projects ") breaks
-    // Quick Entry column↔entry matching and hides duplicates that can't be deleted.
-    c.subclients = c.subclients.map(s => typeof s === 'string' ? s.trim() : s);
   });
-  // Normalise existing entries' subClient the same way so they keep matching columns
-  state.income.forEach(e => { if (typeof e.subClient === 'string') e.subClient = e.subClient.trim(); });
+  normalizeSubclients();
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
   pruneQEGridData();
@@ -996,7 +1010,9 @@ function saveClientEdit() {
   c.name       = name;
   c.type       = editClientType;
   c.color      = editClientColor;
-  c.subclients = editClientType==='Agency' ? editClientSubclients.filter(s=>s.trim()) : [];
+  c.subclients = editClientType==='Agency'
+    ? [...new Set(editClientSubclients.map(s=>(s||'').trim()).filter(Boolean))] // trim + dedupe on save
+    : [];
   // Direct↔Agency restructures the QE columns — drop stale QE drafts for this client
   if (typeChanged) clearQEDraftForClient(id);
   const editPTInv  = document.getElementById('editPayTypeInvoice');
@@ -2179,18 +2195,18 @@ function loadQEFromState(table) {
 
         entries.filter(e => e.subClient).forEach(entry => {
           const sub = entry.subClient;
+          // Resolve effective qty (q) + unit price (u), covering Add-Entry items
+          // saved with ONLY an amount (no qty/unitPrice) — show them as 1 × amount.
+          let q = entry.qty, u = entry.unitPrice;
+          if (q == null && u == null && entry.amount > 0) { q = 1; u = entry.amount; }
+          else if (q == null && u && entry.amount) { q = Math.round(entry.amount / u * 100) / 100; }
+          else if (q != null && u == null && q > 0)  { u = Math.round(entry.amount / q * 100) / 100; }
           const subqtyInp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subqty"]');
-          if (subqtyInp) {
-            if (entry.qty != null) {
-              subqtyInp.value = entry.qty;
-            } else if (entry.unitPrice && entry.amount) {
-              subqtyInp.value = Math.round(entry.amount / entry.unitPrice * 100) / 100;
-            }
-          }
-          // Subprice override: only if different from shared
-          if (entry.unitPrice != null && entry.unitPrice !== sharedPrice) {
+          if (subqtyInp && q != null) subqtyInp.value = q;
+          // Subprice override: only when it differs from the shared price
+          if (u != null && u !== sharedPrice) {
             const subpriceInp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subprice"]');
-            if (subpriceInp) subpriceInp.value = entry.unitPrice;
+            if (subpriceInp) subpriceInp.value = u;
           }
           if (entry.notes) {
             const ni = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subnote"]');
@@ -5127,6 +5143,7 @@ async function autoPull(silent) {
     state.deletedAt  = mergedDeletedAt;
     state.monthlyStopped = mergedStopped;
     if (p.profile) state.profile = p.profile; // cloud profile wins if present
+    normalizeSubclients(); // a merged-in cloud blob may carry a stray trailing space
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
@@ -5196,6 +5213,7 @@ async function cloudPull() {
     state.expenses = p.expenses || [];
     state.services = p.services || [...DEFAULT_SERVICES];
     if (p.profile) state.profile = p.profile;
+    normalizeSubclients();
     state.lastModified = p.lastModified || Date.now();
     idbSet(STORAGE_KEY, state);
     deduplicateIncome();
@@ -5314,6 +5332,7 @@ async function autoPullForced() {
     state.expenses   = [...filteredCloudExpenses, ...localOnlyExpense];
     state.services   = p.services || [...DEFAULT_SERVICES];
     if (p.profile) state.profile = p.profile;
+    normalizeSubclients();
     state.deletedIds = [...allDeletedIdsF];
     state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
     state.monthlyStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
@@ -5423,6 +5442,7 @@ function importData(ev) {
     const p=JSON.parse(e.target.result);
     if(p.clients&&Array.isArray(p.clients)){
       state.clients=p.clients; state.income=p.income||[]; state.expenses=p.expenses||[];
+      normalizeSubclients();
       saveData(); showToast('Data imported'); navigate(currentView);
     } else showToast('Invalid format','error');
   } catch{ showToast('Could not parse file','error'); } };
