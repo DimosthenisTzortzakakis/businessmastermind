@@ -3968,3 +3968,11 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   --text-faint: #8a9bb3;
   --shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12);
 }
+
+/* Quick Entry auto-save note (replaces the old Save button) */
+.qe-autosave-note {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin: 14px 0 4px; padding: 10px;
+  font-size: 13px; font-weight: 600; color: var(--text-muted);
+}
+.qe-autosave-note i { color: var(--green); }

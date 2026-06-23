@@ -784,8 +784,8 @@ function renderSearchResults() {
 
 // ── Navigation ─────────────────────────────────────────────────
 function navigate(view) {
-  // Flush any pending Quick Entry draft before leaving it
-  if (currentView === 'quickentry' && _qePersistTimer) { clearTimeout(_qePersistTimer); _qePersistTimer = null; try { idbSet(QE_GRID_KEY, qeGridData); } catch(_) {} }
+  // Flush any pending Quick Entry auto-saves before leaving it
+  if (currentView === 'quickentry' && typeof qeFlushSave === 'function') qeFlushSave();
   currentView = view;
   saveUIState();
   clearSearch();
@@ -2223,82 +2223,123 @@ function loadQEFromState(table) {
   });
 }
 
+// SINGLE SOURCE OF TRUTH: the grid is filled straight from saved income entries.
+// There is NO draft cache to drift out of sync — edits auto-save (qeAutoSaveCell).
 function restoreQEGridData() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
-
-  // Layer 1: permanent saved data
   loadQEFromState(table);
-
-  // Layer 2: overlay in-session edits (higher priority — includes cleared values)
-  // Skip empty sentinels for numeric cells when the input already has a real value
-  // from Layer 1 (prevents stale blank sentinels from wiping out saved amounts)
-  table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
-    const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-    if (key in qeGridData) {
-      const sentinel = qeGridData[key];
-      const isNumeric = ['qty','price','subqty','subprice'].includes(inp.dataset.type);
-      // Skip zero/empty sentinel if Layer 1 already loaded a real positive value.
-      // This prevents a stale "I cleared this cell" sentinel from wiping out a
-      // saved entry that the user didn't intend to delete.
-      if (isNumeric && (parseFloat(sentinel)||0) <= 0 && (parseFloat(inp.value)||0) > 0) return;
-      inp.value = sentinel;
-      if (inp.dataset.type === 'subnote') {
-        const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-        const visible = visKey in qeGridData ? !!qeGridData[visKey] : (inp.value !== '');
-        inp.style.display = (visible && inp.value) ? 'block' : 'none';
-        const pen = inp.previousElementSibling;
-        if (pen?.classList.contains('qe-note-pen')) pen.style.display = inp.style.display==='block' ? 'none' : '';
-      }
-    }
-  });
-
-  // Recalculate all totals once — skipCol=true so the heavy updateQEColTotals runs
-  // a single time after the loop (not once per cell, which was O(N²)).
+  // Recompute totals once (skipCol=true → no per-cell autosave/colTotals during load)
   const seen = new Set();
   table.querySelectorAll('[data-type="subqty"],[data-type="qty"]').forEach(inp => {
     const k = inp.dataset.client+'|'+inp.dataset.date;
     if (!seen.has(k)) { seen.add(k); updateQEClientTotal(inp, true); }
   });
   updateQEColTotals();
-  // Color the day total cells based on saved entry status
+  // Colour day totals + per-client totals straight from saved status (no draft)
   document.querySelectorAll('.qe-td-total[data-date]').forEach(cell => {
-    const status = getQERowStatus(cell.dataset.date);
-    applyQETotalColor(cell, status);
+    applyQETotalColor(cell, getQERowStatus(cell.dataset.date));
   });
-  // Color per-client-per-day total cells
   document.querySelectorAll('.qe-client-total[data-client][data-date]').forEach(ct => {
-    const cid = ct.dataset.client; const ds = ct.dataset.date;
-    // No service filter — service can differ per subclient; match by clientId+date only
+    const cid = ct.dataset.client, ds = ct.dataset.date;
     const entries = state.income.filter(e => e.clientId===cid && e.date===ds);
     if (!entries.length) return;
-    const hasPending = entries.some(e=>e.status==='Pending');
-    // If there is an unsaved draft value for this cell (any numeric qeGridData key
-    // for this client+date that is non-empty), keep orange — the draft is pending
-    // regardless of what the saved entry status says.
-    const hasDraft = Object.keys(qeGridData).some(k => {
-      const p = k.split('|');
-      return ['price','qty','subqty','subprice'].includes(p[0]) &&
-             p[1] === cid && p[2] === ds && qeGridData[k] !== '';
-    });
-    const isOrange = hasPending || hasDraft;
+    const isOrange = entries.some(e=>e.status==='Pending');
     ct.style.color      = isOrange ? '#f59e0b' : 'var(--green)';
     ct.style.fontWeight = '700';
     ct.title = isOrange ? 'Pending — tap to mark Paid' : 'Paid — tap to mark Pending';
   });
 }
 
-// Clears stale QE draft cache and reloads grid from saved income entries.
-// Use when grid appears empty but data exists in the income records.
 function reloadQEFromData() {
-  qeGridData = {};
-  idbSet(QE_GRID_KEY, {});
   renderQEIncome(document.getElementById('qeContent'));
   showToast('✓ Grid reloaded from saved data');
 }
 
+// ── Quick Entry AUTO-SAVE engine (no draft, no Save button) ───────
+// Each cell edit writes directly to state.income (debounced): create/update when
+// qty>0 & price>0, delete (+tombstone) when cleared. This eliminates the whole
+// class of draft-drift bugs (ghost cells, notes-without-prices, Add-Entry mismatch).
+let _qeSaveTimer = null;
+const _qeDirty = new Set(); // "cid|date|sub" cells pending a save
+function qeSaveDebounced() {
+  clearTimeout(_qeSaveTimer);
+  _qeSaveTimer = setTimeout(qeFlushSave, 500);
+}
+function qeFlushSave() {
+  clearTimeout(_qeSaveTimer); _qeSaveTimer = null;
+  if (!_qeDirty.size) return;
+  _qeDirty.forEach(key => {
+    const [cid, ds, sub] = key.split(' ');
+    qeWriteCell(cid, ds, sub);
+  });
+  _qeDirty.clear();
+  saveData(); // persists to IndexedDB + schedules cloud push (with tombstones)
+}
+// Mark a cell (or, for a shared-price change on an agency, all its subclient cells) dirty
+function qeScheduleAutoSave(inp) {
+  const cid = inp.dataset.client, ds = inp.dataset.date, type = inp.dataset.type;
+  const c = clientById(cid);
+  const hasSubs = c && (c.subclients||[]).length > 0;
+  if (type === 'price' && hasSubs) {
+    (c.subclients||[]).forEach(s => _qeDirty.add(cid+' '+ds+' '+(s||'').trim()));
+  } else {
+    _qeDirty.add(cid+' '+ds+' '+(inp.dataset.sub||''));
+  }
+  qeSaveDebounced();
+}
+// Read a single cell's inputs from the DOM and upsert/delete its entry in state.income
+function qeWriteCell(cid, ds, sub) {
+  const tr = document.querySelector('#qeSpreadsheet tr[data-date="'+ds+'"]');
+  const c  = clientById(cid);
+  if (!tr || !c) return;
+  const payType = c.paymentType || qeGridPayType || 'invoice';
+  const now = Date.now();
+  const hasSubs = (c.subclients||[]).length > 0;
+  let qty, effectivePrice, sharedPrice = null, note;
+  if (hasSubs && sub) {
+    const sq = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subqty"]');
+    const sp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subprice"]');
+    const sn = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subnote"]');
+    const shared = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
+    qty = parseFloat(sq?.value) || 0;
+    sharedPrice = parseFloat(shared?.value) || 0;
+    effectivePrice = parseFloat(sp?.value) || sharedPrice;
+    note = (sn?.value || '').trim();
+  } else if (!hasSubs) {
+    const qi = tr.querySelector('[data-client="'+cid+'"][data-type="qty"]');
+    const pi = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
+    const ni = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
+    qty = parseFloat(qi?.value) || 0;
+    effectivePrice = parseFloat(pi?.value) || 0;
+    note = (ni?.value || '').trim();
+    sub = '';
+  } else { return; }
+  const xi = state.income.findIndex(e => e.clientId===cid && e.date===ds && (e.subClient||'')===(sub||'') && !e.splitGroupId);
+  const amount = Math.round(qty * effectivePrice * 100) / 100;
+  if (qty > 0 && effectivePrice > 0) {
+    const service   = getClientService(cid, sub);
+    const vatAmount = payType==='invoice' ? amount*VAT_RATE : 0;
+    if (xi >= 0) {
+      state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:effectivePrice, notes:note, vatAmount, paymentType:payType, updatedAt:now };
+      if (sharedPrice != null) state.income[xi].sharedPrice = sharedPrice; // status preserved
+    } else {
+      const e = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice,
+        vatAmount, paymentType:payType, date:ds, status:qeGridStatus, notes:note,
+        createdAt:now, updatedAt:now, statusUpdatedAt:now };
+      if (sharedPrice != null) e.sharedPrice = sharedPrice;
+      state.income.push(e);
+      ensureQEClientSelected(cid);
+    }
+  } else if (xi >= 0) {
+    // qty/price no longer valid → the cell was cleared → delete + tombstone
+    addTombstone(state.income[xi].id);
+    state.income.splice(xi, 1);
+  }
+}
+
 function renderQEIncome(cont) {
-  captureQEGridData();
+  // No draft capture — the grid is rebuilt from saved income and edits auto-save.
   if (!qeGridMonth) qeGridMonth = todayVal().slice(0,7);
   const [yr, mo] = qeGridMonth.split('-').map(Number);
   const daysInMonth = new Date(yr, mo, 0).getDate();
@@ -2477,7 +2518,7 @@ function renderQEIncome(cont) {
         </tr></tfoot>
       </table>
     </div>
-    <button class="qe-save-grid-btn" onclick="saveQEGrid()"><i class="fa-solid fa-check"></i> Save All Filled Entries</button>
+    <div class="qe-autosave-note"><i class="fa-solid fa-cloud-arrow-up"></i> Everything saves automatically as you type</div>
   `;
   restoreQEGridData();
 }
@@ -2576,8 +2617,9 @@ function applyQETotalColor(cell, status) {
 }
 
 function updateQEClientTotal(inp, skipCol) {
-  // Record just this cell + persist on idle (NOT a full grid scan + IDB write per keystroke)
-  if (!skipCol) { qeCaptureInput(inp); scheduleQEPersist(); } // skipCol = bulk recompute during render
+  // Live total recompute is synchronous; the actual data write is debounced.
+  // skipCol = bulk recompute during render → don't trigger a save.
+  if (!skipCol) qeScheduleAutoSave(inp);
   const cid = inp.dataset.client;
   const tr = inp.closest('tr');
   const sharedPrice = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="price"]')?.value) || 0;
@@ -2630,26 +2672,15 @@ function updateQEColTotals() {
   const table = document.getElementById('qeSpreadsheet');
   if (!table) return;
   let grand = 0;
-  // Precompute (ONE pass) which clients have a non-empty numeric draft, instead of
-  // scanning the whole draft per client — that O(clients × draftSize) was the hang.
-  const draftClients = new Set();
-  for (const k in qeGridData) {
-    if (qeGridData[k] === '') continue;
-    const t = k.slice(0, k.indexOf('|'));
-    if (t === 'price' || t === 'qty' || t === 'subqty' || t === 'subprice') {
-      draftClients.add(k.split('|')[1]);
-    }
-  }
   table.querySelectorAll('.qe-tf-coltotal').forEach(foot=>{
     const cid = foot.dataset.client;
     let col = 0;
     table.querySelectorAll('.qe-client-total[data-client="'+cid+'"]').forEach(c=>{ col += parseFloat(c.dataset.value)||0; });
     foot.textContent = col > 0 ? fmt(col) : '—';
     grand += col;
-    // Color by payment status — orange if any pending, any draft, or no saved status yet
+    // Colour by saved payment status (single source of truth — no draft)
     const clientStatus = getQEClientStatus(cid);
-    const hasDraftForClient = draftClients.has(cid);
-    if (clientStatus === 'Paid' && !hasDraftForClient) {
+    if (clientStatus === 'Paid') {
       foot.style.color      = 'var(--green)';
       foot.style.fontWeight = '700';
     } else if (col > 0 || clientStatus) {
@@ -2690,7 +2721,8 @@ function qeSubNoteBlur(inp) {
     const pen = inp.previousElementSibling;
     if (pen?.classList.contains('qe-note-pen')) pen.style.display = '';
   }
-  captureQEGridData();
+  // Persist the note onto its entry (if the cell already has qty+price → entry exists)
+  qeScheduleAutoSave(inp);
 }
 
 function closeMobileSidebar() {
