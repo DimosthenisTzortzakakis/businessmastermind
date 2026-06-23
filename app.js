@@ -5813,6 +5813,14 @@ async function init() {
     try { localStorage.setItem('biz_qe_reset_v3', '1'); } catch(_) {}
     saveUIState();
   }
+  // v4: clear ONLY the draft cache (not the column choices). The draft could hold
+  // "ghost" values of entries that were deleted (e.g. duplicates removed) and keep
+  // showing them in the grid. Rebuilding from saved entries fixes it on every device.
+  if (!localStorage.getItem('biz_qe_reset_v4')) {
+    qeGridData = {};
+    try { idbSet(QE_GRID_KEY, {}); } catch(_) {}
+    try { localStorage.setItem('biz_qe_reset_v4', '1'); } catch(_) {}
+  }
   // Always start income/expense tabs on current month (override UIState)
   incMonth  = todayVal().slice(0,7);
   expMonth  = todayVal().slice(0,7);
