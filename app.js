@@ -764,7 +764,7 @@ function renderSearchResults() {
   }).slice(0,8);
 
   const expMatches = state.expenses.filter(e =>
-    [e.vendor, e.category, e.description||'', String(e.amount)].some(s=>s.toLowerCase().includes(q))
+    [e.vendor, e.category, e.description||'', e.notes||'', String(e.amount)].some(s=>s.toLowerCase().includes(q))
   ).slice(0,5);
 
   let html = '';
@@ -3270,6 +3270,45 @@ function renderDashboard() {
     if (countEl) countEl.textContent = totalMissing;
   }
 
+  // ── "Owed to you" — ALL outstanding (Pending) income, NOT period-filtered.
+  // Old unpaid invoices matter most, so this deliberately ignores the dashboard scope.
+  const owedPanel = document.getElementById('owedPanel');
+  if (owedPanel) {
+    const pendingAll = state.income.filter(e => e.status !== 'Paid' && e.clientId !== MAINJOB_CLIENT_ID);
+    if (!pendingAll.length) {
+      owedPanel.style.display = 'none';
+    } else {
+      const todayD = new Date(todayVal());
+      const byCl = {};
+      pendingAll.forEach(e => {
+        const c = clientById(e.clientId);
+        const k = c ? c.id : 'unknown';
+        if (!byCl[k]) byCl[k] = { name:c?.name||'Unknown', color:c?.color||'#888', amount:0, count:0, oldest:e.date };
+        byCl[k].amount += e.amount; byCl[k].count++;
+        if ((e.date||'') < byCl[k].oldest) byCl[k].oldest = e.date;
+      });
+      const rows = Object.entries(byCl).sort((a,b)=>b[1].amount-a[1].amount);
+      const totalOwed = pendingAll.reduce((s,e)=>s+e.amount,0);
+      const daysAgo = ds => Math.max(0, Math.round((todayD - new Date(ds)) / 86400000));
+      owedPanel.style.display = '';
+      owedPanel.innerHTML = `
+        <div class="owed-head">
+          <div class="owed-head-l"><i class="fa-solid fa-hand-holding-dollar"></i><span>Owed to you</span><span class="owed-sub">${pendingAll.length} unpaid · ${rows.length} client${rows.length>1?'s':''}</span></div>
+          <div class="owed-total">${fmt(totalOwed)}</div>
+        </div>
+        <div class="owed-list">${rows.map(([cid,d])=>{
+          const age = daysAgo(d.oldest);
+          const ageCls = age>=45 ? 'owed-old' : age>=21 ? 'owed-mid' : '';
+          return `<div class="owed-row" onclick="goToClientPending('${cid}')" title="See ${esc(d.name)}'s unpaid entries">
+            <div class="ov-dot" style="background:${d.color}"></div>
+            <div class="owed-name">${esc(d.name)}</div>
+            <div class="owed-rmeta"><span class="owed-jobs">${d.count} job${d.count>1?'s':''}</span><span class="owed-age ${ageCls}">oldest ${age}d</span></div>
+            <div class="owed-amt">${fmt(d.amount)}</div>
+          </div>`;
+        }).join('')}</div>`;
+    }
+  }
+
   // VAT
   const vatCol  = inc.filter(e=>e.paymentType==='invoice').reduce((s,e)=>s+(e.vatAmount||0),0);
   const vatDed  = exp.reduce((s,e)=>s+(e.vatAmount||0),0);
@@ -3339,6 +3378,14 @@ function goToIncome(status) {
   incStatus = status;
   incClient = 'all';
   incMonth  = todayVal().slice(0,7);
+  navigate('income');
+}
+// Jump to Income filtered to one client's outstanding (Pending) entries, across ALL months.
+function goToClientPending(cid) {
+  incStatus = 'Pending';
+  incClient = cid;
+  incMonth  = 'all';
+  saveUIState();
   navigate('income');
 }
 
@@ -5459,19 +5506,19 @@ function exportAllToExcel() {
   const wb = XLSX.utils.book_new();
 
   // ── Sheet 1: Income ────────────────────────────────────────────
-  const incRows = [['Date','Client','Sub-Client','Service','Amount (€)','VAT (€)','Total (€)','Status','Payment Type']];
+  const incRows = [['Date','Client','Sub-Client','Service','Amount (€)','VAT (€)','Total (€)','Status','Payment Type','Notes']];
   [...state.income].sort((a,b)=>b.date.localeCompare(a.date)).forEach(e=>{
     const c = clientById(e.clientId);
     const vat = e.vatAmount||0;
     incRows.push([e.date, c?.name||'?', e.subClient||'', e.service,
-      e.amount, vat, e.amount+vat, e.status, e.paymentType==='invoice'?'Invoice':'Cash']);
+      e.amount, vat, e.amount+vat, e.status, e.paymentType==='invoice'?'Invoice':'Cash', e.notes||'']);
   });
   const wsInc = XLSX.utils.aoa_to_sheet(incRows);
-  wsInc['!cols'] = [{wch:12},{wch:20},{wch:18},{wch:24},{wch:12},{wch:10},{wch:12},{wch:10},{wch:12}];
+  wsInc['!cols'] = [{wch:12},{wch:20},{wch:18},{wch:24},{wch:12},{wch:10},{wch:12},{wch:10},{wch:12},{wch:34}];
   XLSX.utils.book_append_sheet(wb, wsInc, 'Income');
 
   // ── Sheet 2: Expenses ──────────────────────────────────────────
-  const expRows = [['Date','Category','Type','Amount (€)','VAT (€)','Payment Method','Recurring']];
+  const expRows = [['Date','Category','Vendor / Note','Amount (€)','VAT (€)','Payment Method','Recurring']];
   [...state.expenses].sort((a,b)=>b.date.localeCompare(a.date)).forEach(e=>{
     expRows.push([e.date, e.category, e.vendor||'', e.amount, e.vatAmount||0, e.paymentMethod||'', e.recurring?'Yes':'No']);
   });
