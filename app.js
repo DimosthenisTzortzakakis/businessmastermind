@@ -294,6 +294,7 @@ let chartExpCat   = null;
 // real entries look "erased". Run on load AND after every cloud merge (a sync could
 // otherwise re-introduce the space from another device's blob).
 function normalizeSubclients() {
+  const definedBy = {}; // clientId → its defined subclient names (for case-normalising entries)
   (state.clients||[]).forEach(c => {
     if (!Array.isArray(c.subclients)) return;
     const seen = new Set(); const out = [];
@@ -303,8 +304,20 @@ function normalizeSubclients() {
       if (!seen.has(t)) { seen.add(t); out.push(t); }
     });
     c.subclients = out;
+    definedBy[c.id] = out;
   });
-  (state.income||[]).forEach(e => { if (typeof e.subClient === 'string') e.subClient = e.subClient.trim(); });
+  (state.income||[]).forEach(e => {
+    if (typeof e.subClient !== 'string') return;
+    e.subClient = e.subClient.trim();
+    // Case-normalise to the client's defined subclient casing — an entry saved as
+    // "citymed" must match the "Citymed" column (otherwise it's invisible in Quick
+    // Entry but still counted in Income, so the totals disagree).
+    const defs = definedBy[e.clientId];
+    if (e.subClient && defs) {
+      const m = defs.find(d => d.toLowerCase() === e.subClient.toLowerCase());
+      if (m && m !== e.subClient) e.subClient = m;
+    }
+  });
 }
 
 // ── Persistence ────────────────────────────────────────────────
@@ -2192,7 +2205,10 @@ function loadQEFromState(table) {
     dayEntries.forEach(e => { (byClient[e.clientId] = byClient[e.clientId]||[]).push(e); });
 
     Object.entries(byClient).forEach(([cid, allClientEntries]) => {
-      const hasSubclients = allClientEntries.some(e => e.subClient);
+      // Agency vs direct is decided by the CLIENT (does it have sub-client columns),
+      // not by whether the entries happen to carry a subclient — otherwise a day with
+      // only no-subclient entries on an agency would wrongly use the direct layout.
+      const hasSubclients = (clientById(cid)?.subclients||[]).length > 0;
       // No service filter: show whatever is stored for this client+date+sub
       const entries = allClientEntries;
 
@@ -2203,8 +2219,8 @@ function loadQEFromState(table) {
         const sharedInp = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
         if (sharedInp) sharedInp.value = sharedPrice || '';
 
-        entries.filter(e => e.subClient).forEach(entry => {
-          const sub = entry.subClient;
+        entries.forEach(entry => {
+          const sub = entry.subClient || ''; // '' → the "no sub-client" column
           // Resolve effective qty (q) + unit price (u), covering Add-Entry items
           // saved with ONLY an amount (no qty/unitPrice) — show them as 1 × amount.
           let q = entry.qty, u = entry.unitPrice;
@@ -2295,7 +2311,7 @@ function qeScheduleAutoSave(inp) {
   const c = clientById(cid);
   const hasSubs = c && (c.subclients||[]).length > 0;
   if (type === 'price' && hasSubs) {
-    (c.subclients||[]).forEach(s => _qeDirty.add(cid+' '+ds+' '+(s||'').trim()));
+    qeColSubs(c).forEach(s => _qeDirty.add(cid+' '+ds+' '+(s||'').trim()));
   } else {
     _qeDirty.add(cid+' '+ds+' '+(inp.dataset.sub||''));
   }
@@ -2310,8 +2326,9 @@ function qeWriteCell(cid, ds, sub) {
   const now = Date.now();
   const hasSubs = (c.subclients||[]).length > 0;
   let qty, effectivePrice, sharedPrice = null, note;
-  if (hasSubs && sub) {
+  if (hasSubs) { // agency — `sub` may be '' (the no-subclient column)
     const sq = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subqty"]');
+    if (!sq) return; // no such cell rendered for this subclient
     const sp = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subprice"]');
     const sn = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subnote"]');
     const shared = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
@@ -2319,7 +2336,7 @@ function qeWriteCell(cid, ds, sub) {
     sharedPrice = parseFloat(shared?.value) || 0;
     effectivePrice = parseFloat(sp?.value) || sharedPrice;
     note = (sn?.value || '').trim();
-  } else if (!hasSubs) {
+  } else {
     const qi = tr.querySelector('[data-client="'+cid+'"][data-type="qty"]');
     const pi = tr.querySelector('[data-client="'+cid+'"][data-type="price"]');
     const ni = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
@@ -2327,7 +2344,7 @@ function qeWriteCell(cid, ds, sub) {
     effectivePrice = parseFloat(pi?.value) || 0;
     note = (ni?.value || '').trim();
     sub = '';
-  } else { return; }
+  }
   const xi = state.income.findIndex(e => e.clientId===cid && e.date===ds && (e.subClient||'')===(sub||'') && !e.splitGroupId);
   // A split payment occupies this cell (invoice + cash halves). QE must NOT stack a
   // plain entry on top of it (that inflates income with a phantom) nor delete a half —
@@ -2360,6 +2377,26 @@ function qeWriteCell(cid, ds, sub) {
     addTombstone(state.income[xi].id);
     state.income.splice(xi, 1);
   }
+}
+
+// Columns for an agency in Quick Entry = its defined subclients PLUS any subclient
+// value that actually appears in its entries this month (so a stray/legacy subclient
+// is still shown), PLUS a "no subclient" bucket ('') if any entry has an empty sub.
+// This guarantees EVERY entry is visible, so the QE total matches the Income total.
+function qeColSubs(c) {
+  const defined = (c.subclients||[]).map(s=>(s||'').trim()).filter(Boolean);
+  if (!defined.length) return []; // direct client → no subclient columns
+  const seen = new Set(defined.map(s=>s.toLowerCase()));
+  const extras = []; let hasEmpty = false;
+  (state.income||[]).forEach(e=>{
+    if (e.clientId!==c.id || !(e.date||'').startsWith(qeGridMonth)) return;
+    const sc = (e.subClient||'').trim();
+    if (!sc) { hasEmpty = true; return; }
+    if (!seen.has(sc.toLowerCase())) { seen.add(sc.toLowerCase()); extras.push(sc); }
+  });
+  const cols = [...defined, ...extras];
+  if (hasEmpty) cols.push(''); // entries with no subclient get their own column
+  return cols;
 }
 
 function renderQEIncome(cont) {
@@ -2408,12 +2445,16 @@ function renderQEIncome(cont) {
 
   // For each client: agency gets one column per subclient (qty+subprice) + SharedPrice + Total
   //                  direct gets Qty + Price + Total
-  const clientColCount = c => (c.subclients||[]).length > 0 ? (c.subclients.length + 2) : 3;
+  // Augmented subclient columns per agency (defined + any in-use + empty bucket) so
+  // every entry is visible and the QE total reconciles with the Income total.
+  const colSubsMap = {};
+  selCols.forEach(c => { colSubsMap[c.id] = qeColSubs(c); });
+  const clientColCount = c => (colSubsMap[c.id]||[]).length > 0 ? (colSubsMap[c.id].length + 2) : 3;
 
   // Header row 1: client name + service (direct) or client name + default service (agency)
   const hRow1 = selCols.map(c=>{
     const bg = hexToRgba(c.color, 0.09);
-    const subs = c.subclients||[];
+    const subs = colSubsMap[c.id]||[];
     const svcVal = (qeClientServices[c.id] || qeGridService || 'Video Editing').replace(/'/g,'&#39;');
     const placeholder = subs.length > 0 ? 'Default service…' : 'Service…';
     return '<th colspan="'+clientColCount(c)+'" class="qe-th-client" style="border-top:3px solid '+c.color+';border-left:2px solid '+c.color+';background:'+bg+';text-align:center">'
@@ -2425,14 +2466,14 @@ function renderQEIncome(cont) {
 
   // Header row 2: per-subclient name + service input (agency) or Qty/Price/Total (direct)
   const hRow2 = selCols.map(c=>{
-    const subs = c.subclients||[];
+    const subs = colSubsMap[c.id]||[];
     const bg = hexToRgba(c.color, 0.06);
     if (subs.length > 0) {
       return subs.map((s,si)=>{
         const subSvcVal = getClientService(c.id, s).replace(/'/g,'&#39;');
         const bl = si===0 ? 'border-left:2px solid '+c.color+';' : '';
         return '<th class="qe-sh" style="'+bl+' background:'+bg+';vertical-align:top">'
-          +'<div>'+s+'</div>'
+          +'<div>'+(s || '<span style="opacity:.6">— no sub-client</span>')+'</div>'
           +'<input class="qe-client-svc-inp" list="servicesList" value="'+subSvcVal+'" placeholder="Service…" '
           +'oninput="setClientService(\''+c.id+'\',\''+s.replace(/'/g,"\\'")+'\',this.value)" />'
           +'</th>';
@@ -2451,7 +2492,7 @@ function renderQEIncome(cont) {
     const ds = qeGridMonth+'-'+String(day).padStart(2,'0');
     const isToday = ds===today;
     const clientCells = selCols.map(c=>{
-      const subs = c.subclients||[];
+      const subs = colSubsMap[c.id]||[];
       const bg = hexToRgba(c.color, 0.05);
       if (subs.length > 0) {
         // Agency: one column per subclient (qty + subprice + pencil note) + shared price + total
@@ -3724,12 +3765,12 @@ function renderIncome() {
             <span class="ec-date">${toDateStr(e.date)}</span>
             <span class="ec-sep">·</span>
             <span class="ec-service">${e.service}${e.subClient?` <em style="opacity:.6">· ${e.subClient}</em>`:''}</span>
+            ${e.notes?`<span class="ec-note" title="${esc(e.notes)}"><i class="fa-solid fa-note-sticky"></i> ${esc(e.notes)}</span>`:'<span class="ec-note-spacer"></span>'}
             <span class="ec-amount">${fmt(e.amount)}</span>
             ${e.recurring?'<span class="badge monthly mini">MONTHLY</span>':''}
             <span class="badge ${e.paymentType} mini">${e.paymentType==='invoice'?'INV':'CASH'}</span>
             <span class="badge ${sl} mini">${e.status.slice(0,3).toUpperCase()}</span>
             ${eaInc(e.id)}
-            ${e.notes?`<span class="ec-note" title="${esc(e.notes)}"><i class="fa-solid fa-note-sticky"></i> ${esc(e.notes)}</span>`:''}
           </div>`;
         }).join('');
         const grpIds = grp.map(e=>e.id);
