@@ -2126,53 +2126,6 @@ function hexToRgba(hex, alpha) {
 
 // Incrementally record a single input into the draft (cheap — O(1)). Used on every
 // keystroke instead of scanning the whole grid.
-function qeCaptureInput(inp) {
-  const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-  const isNumeric = ['qty','price','subqty','subprice'].includes(inp.dataset.type);
-  if (inp.value !== '') qeGridData[key] = inp.value;
-  else if (isNumeric)   qeGridData[key] = '';
-  else delete qeGridData[key];
-  if (inp.dataset.type === 'subnote') {
-    const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-    const isVisible = inp.style.display !== 'none' && inp.style.display !== '';
-    if (isVisible) qeGridData[visKey] = '1'; else delete qeGridData[visKey];
-  }
-}
-// Debounced persist — avoids an IndexedDB write on every keystroke (the lag source)
-let _qePersistTimer = null;
-function scheduleQEPersist() {
-  clearTimeout(_qePersistTimer);
-  _qePersistTimer = setTimeout(() => { idbSet(QE_GRID_KEY, qeGridData); }, 500);
-}
-
-function captureQEGridData() {
-  const table = document.getElementById('qeSpreadsheet');
-  if (!table) return;
-  table.querySelectorAll('input[data-client][data-date]').forEach(inp => {
-    const key = (inp.dataset.type||'')+'|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-    const isNumeric = ['qty','price','subqty','subprice'].includes(inp.dataset.type);
-    if (inp.value !== '') {
-      qeGridData[key] = inp.value;
-    } else if (isNumeric) {
-      // Store empty sentinel so restoreQEGridData can override loadQEFromState for cleared cells
-      qeGridData[key] = '';
-    } else {
-      delete qeGridData[key];
-    }
-    if (inp.dataset.type === 'subnote') {
-      const visKey = 'notevis|'+(inp.dataset.client||'')+'|'+(inp.dataset.date||'')+'|'+(inp.dataset.sub||'');
-      const isVisible = inp.style.display !== 'none' && inp.style.display !== '';
-      if (isVisible) {
-        qeGridData[visKey] = '1';
-      } else {
-        delete qeGridData[visKey];
-      }
-    }
-  });
-  // Persist draft (debounced — keeps IndexedDB writes off the render/keystroke path)
-  scheduleQEPersist();
-}
-
 /* Load permanent income entries for the current month into the grid.
    Service is NOT used as a filter here — one entry per client+date+sub is shown
    regardless of which service it was saved under. */
@@ -2818,119 +2771,6 @@ function toggleQEGridClient(id, checked) {
   renderQEIncome(document.getElementById('qeContent'));
 }
 
-function saveQEGrid() {
-  const table = document.getElementById('qeSpreadsheet');
-  if (!table) return;
-  let savedCount = 0; let savedTotal = 0;
-  table.querySelectorAll('tbody tr').forEach(tr=>{
-    const dateStr = tr.dataset.date;
-    const done = new Set();
-    tr.querySelectorAll('[data-type="price"]').forEach(priceInp=>{
-      const cid = priceInp.dataset.client;
-      if (done.has(cid)) return; done.add(cid);
-      const price = parseFloat(priceInp.value) || 0;
-      const subqtys = tr.querySelectorAll('[data-client="'+cid+'"][data-type="subqty"]');
-      if (subqtys.length > 0) {
-        subqtys.forEach(sq=>{
-          const qty = parseFloat(sq.value) || 0;
-          if (qty <= 0) return;
-          const sub = sq.dataset.sub;
-          const service = getClientService(cid, sub); // per-subclient service
-          const subPriceEl = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subprice"]');
-          const subNoteEl  = tr.querySelector('[data-client="'+cid+'"][data-sub="'+sub+'"][data-type="subnote"]');
-          const effectivePrice = parseFloat(subPriceEl?.value) || price;
-          if (effectivePrice <= 0) return;
-          const subNote = subNoteEl?.value.trim() || '';
-          const amount = Math.round(qty * effectivePrice * 100) / 100;
-          // Upsert: update existing entry or create new
-          // Match on client+date+sub only — service can change, we update it in-place
-          const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')===(sub||''));
-          const cPayType = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
-          if (xi >= 0) {
-            state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:effectivePrice, sharedPrice:price, notes:subNote, vatAmount:cPayType==='invoice'?amount*VAT_RATE:0, paymentType:cPayType, updatedAt:Date.now() };
-            // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
-          } else {
-            const entry = { id:genId(), clientId:cid, subClient:sub||'', service, amount, qty, unitPrice:effectivePrice, sharedPrice:price,
-              vatAmount:cPayType==='invoice'?amount*VAT_RATE:0,
-              paymentType:cPayType, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now(), statusUpdatedAt:Date.now() };
-            state.income.push(entry); sheetsAdd('income',entry);
-          }
-          savedCount++; savedTotal += amount;
-        });
-      } else {
-        const service = getClientService(cid); // direct client — client-level service
-        const qty = parseFloat(tr.querySelector('[data-client="'+cid+'"][data-type="qty"]')?.value) || 0;
-        if (qty <= 0) return;
-        const subNoteEl = tr.querySelector('[data-client="'+cid+'"][data-type="subnote"]');
-        const subNote = subNoteEl?.value.trim() || '';
-        const amount = Math.round(qty * price * 100) / 100;
-        if (amount <= 0) return;
-        // Match on client+date+sub only — service can change, update it in-place
-        const xi = state.income.findIndex(e=>e.clientId===cid && e.date===dateStr && (e.subClient||'')==='');
-        const cPayType2 = clientById(cid)?.paymentType || qeGridPayType || 'invoice';
-        if (xi >= 0) {
-          state.income[xi] = { ...state.income[xi], service, amount, qty, unitPrice:price, notes:subNote, vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0, paymentType:cPayType2, updatedAt:Date.now() };
-          // status is intentionally NOT overwritten — preserve any manual Paid/Pending toggle
-        } else {
-          const entry = { id:genId(), clientId:cid, subClient:'', service, amount, qty, unitPrice:price,
-            vatAmount:cPayType2==='invoice'?amount*VAT_RATE:0,
-            paymentType:cPayType2, date:dateStr, status:qeGridStatus, notes:subNote, createdAt:Date.now(), updatedAt:Date.now(), statusUpdatedAt:Date.now() };
-          state.income.push(entry); sheetsAdd('income',entry);
-        }
-        savedCount++; savedTotal += amount;
-      }
-    });
-  });
-  // Delete entries for cells the user cleared. A cell with an empty SENTINEL in the
-  // draft (qeGridData[key] === '') was explicitly cleared → delete it even if Paid.
-  // A cell that's just empty (no sentinel) only removes Pending entries (safety).
-  // Deletions are tombstoned so they propagate and never resurrect from another device.
-  let removedCount = 0;
-  const removeEntry = (cid2, ds, sub2, cleared) => {
-    state.income = state.income.filter(e => {
-      const match = e.clientId===cid2 && e.date===ds && (e.subClient||'')===(sub2||'') && (cleared || e.status!=='Paid');
-      if (match) { addTombstone(e.id); removedCount++; }
-      return !match;
-    });
-  };
-  table.querySelectorAll('tbody tr').forEach(tr => {
-    const ds = tr.dataset.date;
-    const done3 = new Set();
-    tr.querySelectorAll('[data-type="price"]').forEach(priceInp => {
-      const cid2 = priceInp.dataset.client;
-      if (done3.has(cid2)) return; done3.add(cid2);
-      const subqtys2 = tr.querySelectorAll('[data-client="'+cid2+'"][data-type="subqty"]');
-      if (subqtys2.length > 0) {
-        subqtys2.forEach(sq2 => {
-          if ((parseFloat(sq2.value)||0) <= 0) {
-            const sub2 = sq2.dataset.sub;
-            const cleared = qeGridData['subqty|'+cid2+'|'+ds+'|'+sub2] === '';
-            removeEntry(cid2, ds, sub2, cleared);
-          }
-        });
-      } else {
-        const qi2 = tr.querySelector('[data-client="'+cid2+'"][data-type="qty"]');
-        if ((parseFloat(qi2?.value)||0) <= 0 && (parseFloat(priceInp.value)||0) <= 0) {
-          const cleared = qeGridData['qty|'+cid2+'|'+ds+'|'] === '' || qeGridData['price|'+cid2+'|'+ds+'|'] === '';
-          removeEntry(cid2, ds, '', cleared);
-        }
-      }
-    });
-  });
-
-  if (!savedCount && !removedCount) { showToast('No entries to save','error'); return; }
-  try {
-    saveData(); // persists added/updated entries AND the deletions+tombstones
-  } catch(e) {
-    showPersistentError('❌ Could not save QE — storage full. Export data first then clear space.');
-    return;
-  }
-  showToast(savedCount
-    ? (savedCount+' entries saved — '+fmt(savedTotal) + (removedCount?` · ${removedCount} removed`:''))
-    : `${removedCount} entr${removedCount===1?'y':'ies'} removed`);
-  // Keep all values visible — do NOT clear the grid
-}
-
 function toggleQEDate(btn) {
   const wrap = btn.closest('.qe-date-wrap') || btn.parentElement;
   const inp  = wrap.querySelector('input');
@@ -2948,48 +2788,6 @@ function toggleQEDate(btn) {
 }
 
 /* ── Expense QE Grid ────────────────────────────────────────── */
-
-function captureQEExpGridData() {
-  const table = document.getElementById('qeExpSpreadsheet');
-  if (!table) return;
-  // Reset only days of the current month
-  const [yr,mo] = qeGridMonth.split('-').map(Number);
-  const dim = new Date(yr,mo,0).getDate();
-  for (let i=1;i<=dim;i++) {
-    const ds = qeGridMonth+'-'+String(i).padStart(2,'0');
-    qeExpenseGridData[ds] = [];
-  }
-  table.querySelectorAll('.qe-exp-slot[data-date]').forEach(slotEl=>{
-    const ds = slotEl.dataset.date;
-    const cat  = slotEl.querySelector('[data-type="expcategory"]')?.value||'';
-    const amt  = slotEl.querySelector('[data-type="expamount"]');
-    const note = slotEl.querySelector('[data-type="expnote"]')?.value||'';
-    // Only save slots that have at least a category or an amount (skip empty trailing slots)
-    if (!cat && !(amt?.value||'')) return;
-    if (!qeExpenseGridData[ds]) qeExpenseGridData[ds]=[];
-    qeExpenseGridData[ds].push({ id:amt?.dataset.entryId||'', category:cat, amount:amt?.value||'', note });
-  });
-  // Drop fully-empty date buckets so they reload fresh from state next time
-  Object.keys(qeExpenseGridData).forEach(ds=>{
-    if ((qeExpenseGridData[ds]||[]).every(s=>!s.category&&!s.amount&&!s.note)) delete qeExpenseGridData[ds];
-  });
-  // Persist draft to localStorage so it survives refresh
-  idbSet(QE_EXP_KEY, qeExpenseGridData);
-}
-
-function initQEExpFromState() {
-  const [yr,mo] = qeGridMonth.split('-').map(Number);
-  const dim = new Date(yr,mo,0).getDate();
-  for (let i=1;i<=dim;i++) {
-    const ds = qeGridMonth+'-'+String(i).padStart(2,'0');
-    if (!qeExpenseGridData[ds]) {
-      const saved = state.expenses.filter(e=>e.date===ds);
-      if (saved.length) qeExpenseGridData[ds] = saved.map(e=>({
-        id:e.id, category:e.category||'', amount:e.amount?String(e.amount):'', note:e.vendor||e.description||''
-      }));
-    }
-  }
-}
 
 // ── Expense Quick Entry AUTO-SAVE (no draft, no Save button) ──────
 // Each slot edit writes straight to state.expenses (debounced): create when amount>0,
@@ -3194,34 +2992,6 @@ function updateQEExpGrandTotal() {
   document.querySelectorAll('.qe-exp-day-total').forEach(c=>{ grand+=parseFloat(c.dataset.value)||0; });
   const g = document.getElementById('qeExpGrandTotal');
   if (g) g.textContent = grand>0?fmt(grand):'—';
-}
-
-function saveQEExpenseGrid() {
-  const table = document.getElementById('qeExpSpreadsheet');
-  if (!table) return;
-  let savedCount=0, savedTotal=0;
-  table.querySelectorAll('.qe-exp-slot[data-date]').forEach(slotEl=>{
-    const dateStr  = slotEl.dataset.date;
-    const catSel   = slotEl.querySelector('[data-type="expcategory"]');
-    const amtInp   = slotEl.querySelector('[data-type="expamount"]');
-    const noteInp  = slotEl.querySelector('[data-type="expnote"]');
-    const category = catSel?.value||''; const amount = parseFloat(amtInp?.value)||0;
-    const note = noteInp?.value.trim()||''; const entryId = amtInp?.dataset.entryId||'';
-    if (amount<=0) return;
-    if (entryId) {
-      const xi = state.expenses.findIndex(e=>e.id===entryId);
-      if (xi>=0) state.expenses[xi] = {...state.expenses[xi], category, amount, vendor:note, description:note};
-    } else {
-      const entry = {id:genId(), category, vendor:note, description:note, amount, vatAmount:0,
-        paymentMethod:qeExpPayMethod, recurring:false, date:dateStr, notes:note, createdAt:Date.now()};
-      state.expenses.push(entry); sheetsAdd('expense',entry);
-      if (amtInp) amtInp.dataset.entryId = entry.id;
-    }
-    savedCount++; savedTotal+=amount;
-  });
-  if (!savedCount) { showToast('No entries to save','error'); return; }
-  saveData(); captureQEExpGridData();
-  showToast(savedCount+' expenses saved — '+fmt(savedTotal));
 }
 
 function flashRow(tr, type) {
