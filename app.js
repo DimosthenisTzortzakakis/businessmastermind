@@ -116,7 +116,7 @@ const DEFAULT_CLIENTS = [
 // profile.sources controls which income sections show: { clients, mainJob, sideHustles }
 // profile.onboarded gates the first-run wizard. Income/clients carry kind:
 // 'client' (default) | 'sidehustle' | 'mainjob'.
-let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{}, profile:null };
+let state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, deletedClientIds:[], monthlyStopped:{}, profile:null };
 
 const MAINJOB_CLIENT_ID = '__mainjob__'; // the single pseudo-client that holds salary income
 function defaultProfile() { return { onboarded:false, sources:{ clients:true, mainJob:false, sideHustles:false }, hiddenTabs:[] }; }
@@ -318,6 +318,7 @@ async function loadData() {
       state.services     = p.services   || [...DEFAULT_SERVICES];
       state.deletedIds   = p.deletedIds || [];
       state.deletedAt    = p.deletedAt || {};
+      state.deletedClientIds = p.deletedClientIds || [];
       state.monthlyStopped = p.monthlyStopped || {};
       state.profile      = p.profile || null;
       state.lastModified = p.lastModified || 0;
@@ -1043,6 +1044,8 @@ function deleteClientFromEdit() {
     showToast('Cannot delete client with existing income entries','error'); return;
   }
   state.clients = state.clients.filter(cl=>cl.id!==id);
+  if (!state.deletedClientIds) state.deletedClientIds = [];
+  if (!state.deletedClientIds.includes(id)) state.deletedClientIds.push(id); // propagate the deletion cross-device
   saveData();
   closeSheet('sheetEditClient');
   showToast(`"${c.name}" deleted`);
@@ -5109,16 +5112,18 @@ function scheduleAutoPush() {
 // subclient before it has been pushed. Keeps every local client, adds cloud-only
 // ones, and for clients on both sides unions the subclients (so neither device's
 // additions are lost) while newer scalar fields (name/colour/type) win by updatedAt.
-function mergeClients(localList, cloudList) {
+function mergeClients(localList, cloudList, deletedClientIds) {
+  const del = new Set(deletedClientIds || []);
   const result = new Map();
-  (localList || []).forEach(c => result.set(c.id, c)); // keep local (incl. local-only)
+  (localList || []).forEach(c => { if (!del.has(c.id)) result.set(c.id, c); }); // keep local, drop tombstoned
   (cloudList || []).forEach(cc => {
+    if (del.has(cc.id)) { result.delete(cc.id); return; } // deleted on some device → stays deleted
     const lc = result.get(cc.id);
     if (!lc) { result.set(cc.id, cc); return; } // cloud-only → add
-    const base = (cc.updatedAt || 0) > (lc.updatedAt || 0) ? cc : lc; // newer scalar fields win
-    const subs = [...new Set([...(lc.subclients || []), ...(cc.subclients || [])]
-      .map(s => (s || '').trim()).filter(Boolean))]; // union — never drop a subclient
-    result.set(cc.id, { ...base, subclients: subs });
+    // Newer updatedAt wins the WHOLE client (incl. its subclient list), so BOTH adding
+    // and deleting a subclient propagate. A fresh local edit always out-stamps a stale
+    // cloud copy, so a just-added client/subclient is never clobbered by the 15s pull.
+    result.set(cc.id, (cc.updatedAt || 0) > (lc.updatedAt || 0) ? cc : lc);
   });
   return [...result.values()];
 }
@@ -5148,8 +5153,10 @@ function applyCloudBeforePush(p) {
   state.deletedIds = [...allDeleted];
   state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
   state.monthlyStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
-  // Clients/services: union (keep local + cloud, union subclients) — never drop additions
-  state.clients = mergeClients(state.clients, p.clients);
+  // Clients: merge (newer-wins per client) honouring client tombstones from both sides
+  const allDelClients = new Set([...(state.deletedClientIds||[]), ...(p.deletedClientIds||[])]);
+  state.clients = mergeClients(state.clients, p.clients, allDelClients);
+  state.deletedClientIds = [...allDelClients];
   state.services = [...new Set([...(state.services||[]), ...(p.services||[])])];
   // Profile: we're pushing local intent, so keep local; adopt cloud only if local has none
   if (!state.profile && p.profile) state.profile = p.profile;
@@ -5280,7 +5287,9 @@ async function autoPull(silent) {
     const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id)  && !allDeletedIds.has(e.id));
     const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id) && !allDeletedIds.has(e.id));
 
-    state.clients    = mergeClients(state.clients, p.clients); // merge — don't clobber a just-added client/subclient
+    const allDelClients = new Set([...(state.deletedClientIds||[]), ...(p.deletedClientIds||[])]);
+    state.clients    = mergeClients(state.clients, p.clients, allDelClients); // merge — don't clobber a just-added client/subclient
+    state.deletedClientIds = [...allDelClients];
     state.income     = [...mergedIncome,   ...localOnlyIncome];
     state.expenses   = [...mergedExpenses, ...localOnlyExpense];
     state.services   = p.services || [...DEFAULT_SERVICES];
@@ -5357,6 +5366,7 @@ async function cloudPull() {
     state.income   = p.income   || [];
     state.expenses = p.expenses || [];
     state.services = p.services || [...DEFAULT_SERVICES];
+    state.deletedClientIds = p.deletedClientIds || [];
     if (p.profile) state.profile = p.profile;
     normalizeSubclients();
     state.lastModified = p.lastModified || Date.now();
@@ -5472,7 +5482,9 @@ async function autoPullForced() {
     const filteredCloudExpenses = cloudExpenses.filter(e => !allDeletedIdsF.has(e.id));
     const localOnlyIncome  = (state.income   || []).filter(e => !cloudIncomeIds.has(e.id)  && !allDeletedIdsF.has(e.id));
     const localOnlyExpense = (state.expenses || []).filter(e => !cloudExpenseIds.has(e.id) && !allDeletedIdsF.has(e.id));
-    state.clients    = mergeClients(state.clients, p.clients); // merge — don't clobber a just-added client/subclient
+    const allDelClientsF = new Set([...(state.deletedClientIds||[]), ...(p.deletedClientIds||[])]);
+    state.clients    = mergeClients(state.clients, p.clients, allDelClientsF); // merge — don't clobber a just-added client/subclient
+    state.deletedClientIds = [...allDelClientsF];
     state.income     = [...filteredCloudIncome,   ...localOnlyIncome];
     state.expenses   = [...filteredCloudExpenses, ...localOnlyExpense];
     state.services   = p.services || [...DEFAULT_SERVICES];
@@ -6460,7 +6472,7 @@ async function onAuthReady() {
   if (authUid) {
     const lastUid = localStorage.getItem(LAST_UID_KEY) || '';
     if (lastUid && lastUid !== authUid) {
-      state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, monthlyStopped:{} };
+      state = { clients:[], income:[], expenses:[], services:[], deletedIds:[], deletedAt:{}, deletedClientIds:[], monthlyStopped:{} };
       try { await idbSet(STORAGE_KEY, state); } catch(_) {}
     }
     localStorage.setItem(LAST_UID_KEY, authUid);
