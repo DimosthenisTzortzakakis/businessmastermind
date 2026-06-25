@@ -4036,3 +4036,22 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* Hide the mobile bottom nav while any sheet/modal is open (class-driven so it can
    never get stuck hidden — fixes "Add Entry does nothing" after closing a sheet). */
 body.sheet-open .bottom-nav { display: none !important; }
+
+/* ── "Owed to you" collapsible ─────────────────────────────────── */
+.owed-panel .owed-list { display: none; }
+.owed-panel.expanded .owed-list { display: flex; }
+.owed-head { cursor: pointer; user-select: none; }
+.owed-head-r { display: flex; align-items: center; gap: 10px; }
+.owed-chevron { color: var(--text-muted); font-size: 13px; transition: transform .2s; }
+.owed-panel.expanded .owed-chevron { transform: rotate(180deg); }
+
+/* ── "+ Add" buttons in the income / expense view bars ─────────── */
+.vtb-add {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px; border-radius: 9px;
+  background: var(--green); border: none; color: #fff;
+  font-size: 13px; font-weight: 700; cursor: pointer;
+  transition: var(--transition); flex-shrink: 0;
+}
+.vtb-add:hover { filter: brightness(1.12); }
+.vtb-add i { font-size: 11px; }

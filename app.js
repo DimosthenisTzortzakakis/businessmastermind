@@ -3107,10 +3107,11 @@ function renderDashboard() {
       const totalOwed = pendingAll.reduce((s,e)=>s+e.amount,0);
       const daysAgo = ds => Math.max(0, Math.round((todayD - new Date(ds)) / 86400000));
       owedPanel.style.display = '';
+      owedPanel.className = 'owed-panel' + (owedExpanded ? ' expanded' : ''); // collapsed by default
       owedPanel.innerHTML = `
-        <div class="owed-head">
+        <div class="owed-head" onclick="toggleOwedPanel()" title="Tap to ${owedExpanded?'collapse':'expand'}">
           <div class="owed-head-l"><i class="fa-solid fa-hand-holding-dollar"></i><span>Owed to you</span><span class="owed-sub">${pendingAll.length} unpaid · ${rows.length} client${rows.length>1?'s':''}</span></div>
-          <div class="owed-total">${fmt(totalOwed)}</div>
+          <div class="owed-head-r"><div class="owed-total">${fmt(totalOwed)}</div><i class="fa-solid fa-chevron-down owed-chevron"></i></div>
         </div>
         <div class="owed-list">${rows.map(([cid,d])=>{
           const age = daysAgo(d.oldest);
@@ -3195,6 +3196,17 @@ function goToIncome(status) {
   incClient = 'all';
   incMonth  = todayVal().slice(0,7);
   navigate('income');
+}
+// "Owed to you" dashboard panel — collapsed by default, tap the header to expand.
+let owedExpanded = false;
+function toggleOwedPanel() {
+  owedExpanded = !owedExpanded;
+  const p = document.getElementById('owedPanel');
+  if (p) {
+    p.classList.toggle('expanded', owedExpanded);
+    const h = p.querySelector('.owed-head');
+    if (h) h.title = 'Tap to ' + (owedExpanded ? 'collapse' : 'expand');
+  }
 }
 // Jump to Income filtered to one client's outstanding (Pending) entries, across ALL months.
 function goToClientPending(cid) {
@@ -3502,7 +3514,7 @@ function renderIncome() {
   const totalChip = `<div class="inc-grand" title="Total of the entries shown"><span class="inc-grand-label">Total</span><span class="inc-grand-val">${fmt(incGrand)}</span>${incStatus==='all'&&incPendSum>0?`<span class="inc-grand-sub">${fmt(incPaidSum)} paid · ${fmt(incPendSum)} pending</span>`:''}</div>`;
 
   const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('excel','table','Excel')}</div>${totalChip}<button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('excel','table','Excel')}</div>${totalChip}<button class="vtb-add" onclick="openAddIncome()" title="Add an income entry"><i class="fa-solid fa-plus"></i><span class="vtb-label">Income</span></button><button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
 
   if (!entries.length) {
     html += '<div class="empty-state"><i class="fa-solid fa-arrow-trend-up"></i><p>No entries match filters</p><small>Tap + to add income</small></div>';
@@ -3668,7 +3680,7 @@ function renderExpenses() {
     </div>
   </div>`;
   const vtExp = (m,icon,label) => `<button class="vtb ${expViewMode===m?'active':''}" title="${label}" onclick="setExpViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('excel','table','Excel')}</div></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('excel','table','Excel')}</div><button class="vtb-add" onclick="openAddExpense()" title="Add an expense" style="margin-left:auto"><i class="fa-solid fa-plus"></i><span class="vtb-label">Expense</span></button></div>`;
 
   let entries = [...state.expenses];
   if (expMonth!=='all')    entries=entries.filter(e=>monthKey(e.date)===expMonth);
