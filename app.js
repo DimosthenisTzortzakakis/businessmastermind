@@ -3486,15 +3486,21 @@ function renderIncome() {
     </div>
   </div>`;
 
-  const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('excel','table','Excel')}</div><button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
-
   let entries = [...state.income];
   if (incMonth!=='all')   entries=entries.filter(e=>monthKey(e.date)===incMonth);
   if (incClient!=='all')  entries=entries.filter(e=>e.clientId===incClient);
   if (incStatus!=='all')  entries=entries.filter(e=>e.status===incStatus);
   if (incPayType!=='all') entries=entries.filter(e=>e.paymentType===incPayType);
   entries.sort((a,b)=>b.date.localeCompare(a.date));
+
+  // Grand total of the currently-filtered entries — shown top-right of the view bar
+  const incPaidSum = entries.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
+  const incPendSum = entries.filter(e=>e.status!=='Paid').reduce((s,e)=>s+e.amount,0);
+  const incGrand   = incPaidSum + incPendSum;
+  const totalChip = `<div class="inc-grand" title="Total of the entries shown"><span class="inc-grand-label">Total</span><span class="inc-grand-val">${fmt(incGrand)}</span>${incStatus==='all'&&incPendSum>0?`<span class="inc-grand-sub">${fmt(incPaidSum)} paid · ${fmt(incPendSum)} pending</span>`:''}</div>`;
+
+  const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('excel','table','Excel')}</div>${totalChip}<button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
 
   if (!entries.length) {
     html += '<div class="empty-state"><i class="fa-solid fa-arrow-trend-up"></i><p>No entries match filters</p><small>Tap + to add income</small></div>';

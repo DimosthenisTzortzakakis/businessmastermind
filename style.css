@@ -4018,3 +4018,17 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .owed-age.owed-mid { color: var(--amber); }
 .owed-age.owed-old { color: var(--red); font-weight:700; }
 .owed-amt { font-weight:700; color: var(--amber); flex-shrink:0; min-width:64px; text-align:right; }
+
+/* ── Income grand-total chip (top-right of the view bar) ───────── */
+.inc-grand { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.12; padding-right: 4px; }
+.inc-grand-label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); font-weight: 600; }
+.inc-grand-val { font-size: 18px; font-weight: 800; color: var(--green); }
+.inc-grand-sub { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+
+/* ── Compact By-Client rows: single line, horizontal action buttons ── */
+.byclient-group .entry-compact { padding: 6px 12px; gap: 10px; min-height: 0; }
+.byclient-group .entry-compact .ec-service { flex-shrink: 0; }
+.byclient-group .entry-compact .entry-actions {
+  flex-direction: row; padding-left: 0; gap: 4px; align-self: center;
+}
+.byclient-group .entry-compact .ea-btn { width: 23px; height: 23px; font-size: 9px; }
