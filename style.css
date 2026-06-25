@@ -4055,3 +4055,31 @@ body.sheet-open .bottom-nav { display: none !important; }
 }
 .vtb-add:hover { filter: brightness(1.12); }
 .vtb-add i { font-size: 11px; }
+
+/* ── Light theme: sheets/modals must follow the theme (were hardcoded dark) ── */
+[data-theme="light"] .sheet,
+[data-theme="light"] .sheet-small {
+  background: rgba(255,255,255,0.975);
+  border-color: rgba(20,20,40,0.12);
+  box-shadow: 0 -8px 48px rgba(20,20,40,0.22), inset 0 1px 0 rgba(255,255,255,0.85);
+}
+[data-theme="light"] .search-results-panel {
+  background: rgba(255,255,255,0.975);
+  border: 1px solid rgba(20,20,40,0.12);
+  box-shadow: 0 12px 40px rgba(20,20,40,0.18);
+}
+/* White circular back/close buttons read better with a subtle border in light theme */
+[data-theme="light"] .sheet-back,
+[data-theme="light"] .sheet-close { border: 1px solid rgba(20,20,40,0.12); }
+
+/* ── Income/Expense view-bar: total colour + right group + button variants ── */
+.inc-grand { margin-left: 0; }
+.inc-grand-val.green { color: var(--green); }
+.inc-grand-val.amber { color: var(--amber); }
+.inc-grand-val.red   { color: var(--red); }
+.vtb-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.vtb-add-income  { background: var(--green) !important; }
+.vtb-add-expense { background: var(--red) !important; }
+
+/* Select sits flush-left next to the View toggle (right group handles the rest) */
+.view-toggle-bar .vtb-action { margin-left: 0; }

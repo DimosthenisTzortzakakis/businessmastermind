@@ -3511,10 +3511,11 @@ function renderIncome() {
   const incPaidSum = entries.filter(e=>e.status==='Paid').reduce((s,e)=>s+e.amount,0);
   const incPendSum = entries.filter(e=>e.status!=='Paid').reduce((s,e)=>s+e.amount,0);
   const incGrand   = incPaidSum + incPendSum;
-  const totalChip = `<div class="inc-grand" title="Total of the entries shown"><span class="inc-grand-label">Total</span><span class="inc-grand-val">${fmt(incGrand)}</span>${incStatus==='all'&&incPendSum>0?`<span class="inc-grand-sub">${fmt(incPaidSum)} paid · ${fmt(incPendSum)} pending</span>`:''}</div>`;
+  const incTotalCls = incPendSum > 0 ? 'amber' : 'green'; // orange when anything's pending, green when all paid
+  const totalChip = `<div class="inc-grand" title="Total of the entries shown"><span class="inc-grand-label">Total</span><span class="inc-grand-val ${incTotalCls}">${fmt(incGrand)}</span>${incStatus==='all'&&incPendSum>0?`<span class="inc-grand-sub">${fmt(incPaidSum)} paid · ${fmt(incPendSum)} pending</span>`:''}</div>`;
 
   const vtInc = (m,icon,label) => `<button class="vtb ${incViewMode===m?'active':''}" title="${label}" onclick="setIncViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('excel','table','Excel')}</div>${totalChip}<button class="vtb-add" onclick="openAddIncome()" title="Add an income entry"><i class="fa-solid fa-plus"></i><span class="vtb-label">Income</span></button><button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button></div>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtInc('byclient','layer-group','By Client')}${vtInc('excel','table','Excel')}</div><button class="vtb-action ${incBulkMode?'active':''}" onclick="toggleIncBulkMode()" title="Select multiple entries to delete"><i class="fa-solid fa-check-square"></i><span class="vtb-label">${incBulkMode?'Done':'Select'}</span></button><div class="vtb-right"><button class="vtb-add vtb-add-income" onclick="openAddIncome()" title="Add an income entry"><i class="fa-solid fa-plus"></i><span class="vtb-label">Income</span></button>${totalChip}</div></div>`;
 
   if (!entries.length) {
     html += '<div class="empty-state"><i class="fa-solid fa-arrow-trend-up"></i><p>No entries match filters</p><small>Tap + to add income</small></div>';
@@ -3679,13 +3680,16 @@ function renderExpenses() {
           <option value="all" ${expCategory==='all'?'selected':''}>All Categories</option>${catOpts}</select></div>
     </div>
   </div>`;
-  const vtExp = (m,icon,label) => `<button class="vtb ${expViewMode===m?'active':''}" title="${label}" onclick="setExpViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
-  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('excel','table','Excel')}</div><button class="vtb-add" onclick="openAddExpense()" title="Add an expense" style="margin-left:auto"><i class="fa-solid fa-plus"></i><span class="vtb-label">Expense</span></button></div>`;
-
   let entries = [...state.expenses];
   if (expMonth!=='all')    entries=entries.filter(e=>monthKey(e.date)===expMonth);
   if (expCategory!=='all') entries=entries.filter(e=>e.category===expCategory);
   entries.sort((a,b)=>b.date.localeCompare(a.date));
+
+  // Total of the filtered expenses (same layout as Income: right group, red total)
+  const expTotal = entries.reduce((s,e)=>s+e.amount,0);
+  const expTotalChip = `<div class="inc-grand" title="Total expenses shown"><span class="inc-grand-label">Total</span><span class="inc-grand-val red">${fmt(expTotal)}</span></div>`;
+  const vtExp = (m,icon,label) => `<button class="vtb ${expViewMode===m?'active':''}" title="${label}" onclick="setExpViewMode('${m}')"><i class="fa-solid ${icon}"></i><span class="vtb-label">${label}</span></button>`;
+  html += `<div class="view-toggle-bar"><span class="vt-label">View</span><div class="vtb-group">${vtExp('bycategory','layer-group','By Category')}${vtExp('excel','table','Excel')}</div><div class="vtb-right"><button class="vtb-add vtb-add-expense" onclick="openAddExpense()" title="Add an expense"><i class="fa-solid fa-plus"></i><span class="vtb-label">Expense</span></button>${expTotalChip}</div></div>`;
 
   if (!entries.length) {
     html += '<div class="empty-state"><i class="fa-solid fa-arrow-trend-down"></i><p>No entries match filters</p><small>Tap + to add an expense</small></div>';
