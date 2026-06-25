@@ -4032,3 +4032,7 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   flex-direction: row; padding-left: 0; gap: 4px; align-self: center;
 }
 .byclient-group .entry-compact .ea-btn { width: 23px; height: 23px; font-size: 9px; }
+
+/* Hide the mobile bottom nav while any sheet/modal is open (class-driven so it can
+   never get stuck hidden — fixes "Add Entry does nothing" after closing a sheet). */
+body.sheet-open .bottom-nav { display: none !important; }

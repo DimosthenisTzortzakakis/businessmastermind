@@ -693,9 +693,10 @@ function _openSheet(id) {
   // sheet stuck off-screen — that was the "edit button does nothing" bug.)
   void el.offsetWidth;
   el.classList.add('open');
-  // Hide bottom nav so it never blocks the sheet's save button
-  const nav = document.querySelector('.bottom-nav');
-  if (nav) nav.style.display = 'none';
+  // Hide the mobile bottom nav while a sheet is open (so it never blocks the save
+  // button). Class-driven on <body> so it can NEVER get stuck hidden — that was the
+  // "Add Entry does nothing on mobile" bug (closeSheet left an inline display:none).
+  document.body.classList.add('sheet-open');
 }
 
 function _closeSheetSync(id) {
@@ -712,9 +713,7 @@ function closeAllModals() {
   const cd = document.getElementById('confirmDialog');
   if (cd) cd.classList.remove('open');
   document.getElementById('clientDropdown').classList.add('hidden');
-  // Restore bottom nav
-  const nav = document.querySelector('.bottom-nav');
-  if (nav) nav.style.display = '';
+  document.body.classList.remove('sheet-open'); // restore the mobile bottom nav
 }
 
 function openAddPicker()  { closeAllModals(); _openSheet('sheetPicker'); }
@@ -745,7 +744,10 @@ function closeSheet(id) {
   _closeSheetSync(id);
   activeSheet = null;
   const anyOpen = document.querySelectorAll('.sheet.open').length;
-  if (!anyOpen) document.getElementById('modalOverlay').classList.add('hidden');
+  if (!anyOpen) {
+    document.getElementById('modalOverlay').classList.add('hidden');
+    document.body.classList.remove('sheet-open'); // restore the mobile bottom nav
+  }
 }
 
 // ── Search ─────────────────────────────────────────────────────
@@ -5947,9 +5949,9 @@ async function init() {
     const adjustViewport = () => {
       const vv     = window.visualViewport;
       const vvH    = Math.floor(vv.height);
-      // Pin bottom nav above keyboard
+      // Pin bottom nav above keyboard (skip while a sheet is open — it's hidden then)
       const nav = document.querySelector('.bottom-nav');
-      if (nav && nav.style.display !== 'none') {
+      if (nav && !document.body.classList.contains('sheet-open')) {
         const offset = window.innerHeight - vvH - vv.offsetTop;
         nav.style.transform = offset > 10 ? `translateY(-${offset}px)` : '';
       }
