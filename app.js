@@ -348,7 +348,7 @@ async function loadData() {
     if (!Array.isArray(c.subclients)) c.subclients = []; // backfill so edit never crashes
     if (!c.kind) c.kind = 'client'; // backfill source kind
   });
-  normalizeSubclients();
+  normalizeSubclients(); migrateMonthlyStopped();
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
   pruneQEGridData();
@@ -4514,8 +4514,22 @@ function revertTodayPaidToMonth(month) {
 // ── Monthly (recurring) series helpers ─────────────────────────
 // A "series" is the recurring template identified by who+what. Each calendar
 // month is a separate entry instance sharing the same series key.
-function incSeriesKey(e) { return 'inc\x00' + e.clientId + '\x00' + e.service + '\x00' + (e.subClient||''); }
-function expSeriesKey(e) { return 'exp\x00' + e.category + '\x00' + e.vendor; }
+// Firebase keys may NOT contain . $ # [ ] / or control chars. These series keys are
+// used as `monthlyStopped` object keys; the old \x00 delimiter (and raw service/vendor
+// names that can contain a dot) made Firebase reject the whole PUT with HTTP 400 —
+// silently breaking ALL cloud sync the moment a recurring series was stopped. Encode
+// them base64url so the key is always Firebase-safe.
+function _b64urlEnc(s){ try { return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); } catch(_){ return String(s).replace(/[^A-Za-z0-9_-]/g,'_'); } }
+function incSeriesKey(e) { return 'k_' + _b64urlEnc('inc\x00' + e.clientId + '\x00' + e.service + '\x00' + (e.subClient||'')); }
+function expSeriesKey(e) { return 'k_' + _b64urlEnc('exp\x00' + e.category + '\x00' + e.vendor); }
+// Convert any legacy/unsafe monthlyStopped keys to the safe form (idempotent) so a
+// push can never 400 on a forbidden key again.
+function migrateMonthlyStopped(){
+  const ms = state.monthlyStopped; if (!ms || typeof ms !== 'object') return;
+  let changed = false; const out = {};
+  for (const k in ms){ const nk = k.indexOf('k_')===0 ? k : ('k_' + _b64urlEnc(k)); if (nk!==k) changed = true; out[nk] = ms[k]; }
+  if (changed) state.monthlyStopped = out;
+}
 function seriesKeyOf(kind, e) { return kind==='income' ? incSeriesKey(e) : expSeriesKey(e); }
 // A series is "stopped" from month M onward when the user deleted "this + future".
 function seriesStoppedFrom(key) { return (state.monthlyStopped && state.monthlyStopped[key]) || null; }
@@ -4536,7 +4550,7 @@ function generateRecurring(silent=false) {
   });
   incTemplates.forEach((tmpl, k)=>{
     if (isSeriesStoppedForMonth(k, currentMonth)) return; // series stopped — don't regenerate
-    const [, clientId, service, subClient] = k.split('\x00');
+    const clientId = tmpl.clientId, service = tmpl.service, subClient = tmpl.subClient||''; // from the template (key is now encoded)
     const exists = state.income.some(e=>
       e.recurring && e.clientId===clientId && e.service===service &&
       (e.subClient||'')===(subClient||'') && monthKey(e.date)===currentMonth
@@ -4557,7 +4571,7 @@ function generateRecurring(silent=false) {
   });
   expTemplates.forEach((tmpl, k)=>{
     if (isSeriesStoppedForMonth(k, currentMonth)) return;
-    const [, category, vendor] = k.split('\x00');
+    const category = tmpl.category, vendor = tmpl.vendor; // from the template (key is now encoded)
     const exists = state.expenses.some(e=>
       e.recurring && e.category===category && e.vendor===vendor && monthKey(e.date)===currentMonth
     );
@@ -5132,7 +5146,7 @@ async function autoPull(silent) {
     state.deletedAt  = mergedDeletedAt;
     state.monthlyStopped = mergedStopped;
     if (p.profile) state.profile = p.profile; // cloud profile wins if present
-    normalizeSubclients(); // a merged-in cloud blob may carry a stray trailing space
+    normalizeSubclients(); migrateMonthlyStopped(); // a merged-in cloud blob may carry a stray trailing space
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
@@ -5203,7 +5217,7 @@ async function cloudPull() {
     state.services = p.services || [...DEFAULT_SERVICES];
     state.deletedClientIds = p.deletedClientIds || [];
     if (p.profile) state.profile = p.profile;
-    normalizeSubclients();
+    normalizeSubclients(); migrateMonthlyStopped();
     state.lastModified = p.lastModified || Date.now();
     idbSet(STORAGE_KEY, state);
     deduplicateIncome();
@@ -5324,7 +5338,7 @@ async function autoPullForced() {
     state.expenses   = [...filteredCloudExpenses, ...localOnlyExpense];
     state.services   = p.services || [...DEFAULT_SERVICES];
     if (p.profile) state.profile = p.profile;
-    normalizeSubclients();
+    normalizeSubclients(); migrateMonthlyStopped();
     state.deletedIds = [...allDeletedIdsF];
     state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
     state.monthlyStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
@@ -5434,7 +5448,7 @@ function importData(ev) {
     const p=JSON.parse(e.target.result);
     if(p.clients&&Array.isArray(p.clients)){
       state.clients=p.clients; state.income=p.income||[]; state.expenses=p.expenses||[];
-      normalizeSubclients();
+      normalizeSubclients(); migrateMonthlyStopped();
       saveData(); showToast('Data imported'); navigate(currentView);
     } else showToast('Invalid format','error');
   } catch{ showToast('Could not parse file','error'); } };
