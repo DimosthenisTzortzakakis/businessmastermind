@@ -5153,8 +5153,10 @@ async function autoPull(silent) {
     // Remove any duplicate recurring entries that crept in via multi-device race
     deduplicateIncome();
     deduplicateExpenses();
-    // If we had local-only entries, push the merged result back to Firebase
-    if (localOnlyIncome.length || localOnlyExpense.length) {
+    // Push the merged result back if we have local-only entries OR the local state is
+    // newer than the cloud (a local edit that never reached the cloud — e.g. a push
+    // that failed earlier and was stranded — would otherwise sit locally forever).
+    if (localOnlyIncome.length || localOnlyExpense.length || localTs > cloudTs) {
       scheduleAutoPush();
     }
     // Only re-render if entry IDs or statuses actually changed
@@ -5342,13 +5344,14 @@ async function autoPullForced() {
     state.deletedIds = [...allDeletedIdsF];
     state.deletedAt  = { ...(p.deletedAt||{}), ...(state.deletedAt||{}) };
     state.monthlyStopped = { ...(p.monthlyStopped||{}), ...(state.monthlyStopped||{}) };
+    const _fLocalNewer = (state.lastModified||0) > (p.lastModified||0); // local has unpushed changes
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
     idbSet(STORAGE_KEY, state);
     // Remove any duplicate recurring entries from multi-device race
     deduplicateIncome();
     deduplicateExpenses();
-    // Push merged result back if we had local-only entries
-    if (localOnlyIncome.length || localOnlyExpense.length) scheduleAutoPush();
+    // Push merged result back if we had local-only entries OR local is newer than cloud
+    if (localOnlyIncome.length || localOnlyExpense.length || _fLocalNewer) scheduleAutoPush();
     navigate(currentView);
     afterSyncProfile();
     setSyncIndicator('ok');
