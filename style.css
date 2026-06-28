@@ -4083,3 +4083,15 @@ body.sheet-open .bottom-nav { display: none !important; }
 
 /* Select sits flush-left next to the View toggle (right group handles the rest) */
 .view-toggle-bar .vtb-action { margin-left: 0; }
+
+/* ── Light theme: copy/print dialog + bulk action bar (were hardcoded dark) ── */
+[data-theme="light"] .copy-dialog {
+  background: rgba(255,255,255,0.985);
+  border-color: rgba(20,20,40,0.12);
+  box-shadow: 0 24px 60px rgba(20,20,40,0.22), inset 0 1px 0 rgba(255,255,255,0.85);
+}
+[data-theme="light"] .bulk-action-bar {
+  background: rgba(255,255,255,0.97);
+  border-color: rgba(20,20,40,0.14);
+  box-shadow: 0 12px 40px rgba(20,20,40,0.2);
+}
