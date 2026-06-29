@@ -169,6 +169,7 @@ let reportSubMode   = 'separated'; // 'combined' | 'separated'
 // Print options dialog
 let _printSubMode    = 'separated';
 let _printPayFilter  = 'all';
+let _printStatusFilter = 'all'; // 'all' | 'Paid' | 'Pending' — print both / only paid / only pending
 let _printMonths     = null;  // null = all months, array = specific months
 let _printSubClients = null;  // null = all subclients, array = specific ones
 
@@ -4103,6 +4104,7 @@ function showPrintOptionsDialog(clientId, month) {
   // Init print state
   _printSubMode    = 'separated';
   _printPayFilter  = reportPayFilter || 'all';
+  _printStatusFilter = 'all';
   _printMonths     = month ? [month] : null; // pre-select current month if one was chosen
   _printSubClients = null; // all subclients by default
 
@@ -4171,6 +4173,14 @@ function showPrintOptionsDialog(clientId, month) {
         <button class="report-type-tab" data-mode="combined" onclick="setPrintSubMode('combined')"><i class="fa-solid fa-layer-group"></i> Combined</button>
       </div>
     </div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Status</div>
+      <div style="display:flex;gap:8px" id="printStatusFilterToggle">
+        <button class="report-type-tab ${_printStatusFilter==='all'?'active':''}" data-sf="all" onclick="setPrintStatusFilter('all')">Both</button>
+        <button class="report-type-tab ${_printStatusFilter==='Paid'?'active':''}" data-sf="Paid" onclick="setPrintStatusFilter('Paid')"><i class="fa-solid fa-circle-check"></i> Paid</button>
+        <button class="report-type-tab ${_printStatusFilter==='Pending'?'active':''}" data-sf="Pending" onclick="setPrintStatusFilter('Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
+      </div>
+    </div>
     <div style="margin-bottom:20px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Payment Filter</div>
       <div style="display:flex;gap:8px" id="printPayFilterToggle">
@@ -4225,6 +4235,11 @@ function setPrintPayFilter(pf) {
   document.querySelectorAll('#printPayFilterToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.pf===pf));
 }
 
+function setPrintStatusFilter(sf) {
+  _printStatusFilter = sf;
+  document.querySelectorAll('#printStatusFilterToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.sf===sf));
+}
+
 function closePrintOptionsDialog() {
   const dlg = document.getElementById('printOptionsDialog');
   if (dlg) dlg.classList.remove('open');
@@ -4238,23 +4253,25 @@ function confirmPrintReport() {
   if (_printSubClients !== null && _printSubClients.length === 0) { showToast('Select at least one sub-client', 'error'); return; }
   const clientId = dlg.dataset.clientId;
   closePrintOptionsDialog();
-  executePrintReport(clientId, _printMonths, _printSubMode, _printPayFilter, _printSubClients);
+  executePrintReport(clientId, _printMonths, _printSubMode, _printPayFilter, _printSubClients, _printStatusFilter);
 }
 
-function executePrintReport(clientId, months, subMode, payFilter, subClients) {
+function executePrintReport(clientId, months, subMode, payFilter, subClients, statusFilter) {
   let entries = clientId==='__all__' ? [...state.income] : state.income.filter(e=>e.clientId===clientId);
   // months: null = all, array = specific months
   if (months && months.length) entries = entries.filter(e => months.includes(monthKey(e.date)));
   // subClients: null = all, array = specific subclients (only for single client)
   if (subClients && clientId !== '__all__') entries = entries.filter(e => subClients.includes(e.subClient || ''));
   if (payFilter!=='all') entries = entries.filter(e=>e.paymentType===payFilter);
+  if (statusFilter && statusFilter!=='all') entries = entries.filter(e=>e.status===statusFilter); // Paid-only / Pending-only
   if (!entries.length) { showToast('No entries to print','error'); return; }
   entries.sort((a,b)=>a.date.localeCompare(b.date));
 
   const isAll = clientId==='__all__';
   const client = isAll ? null : clientById(clientId);
   const title = isAll ? 'All Income' : (client?.name||'Report');
-  const filterLabel = payFilter==='cash' ? ' — Cash Only' : payFilter==='invoice' ? ' — Invoice / VAT' : '';
+  const statusLabel = statusFilter==='Paid' ? ' — Paid only' : statusFilter==='Pending' ? ' — Pending only' : '';
+  const filterLabel = (payFilter==='cash' ? ' — Cash Only' : payFilter==='invoice' ? ' — Invoice / VAT' : '') + statusLabel;
   // Build a readable month string for the PDF header
   const monthStr = !months ? '' :
     months.length === 1 ? ' · '+monthLabel(months[0]) :
