@@ -4246,6 +4246,17 @@ function closePrintOptionsDialog() {
   if (!activeSheet) document.getElementById('modalOverlay').classList.add('hidden');
 }
 
+// Resolve an entry's [qty, unitPrice] for display the same way Quick Entry does
+// (loadQEFromState): entries saved with only an amount (e.g. via + Add Entry, no
+// qty/unitPrice) show as 1 × amount instead of a blank Qty/€-per-unit in reports.
+function resolveQtyUnit(e) {
+  let q = e.qty, u = e.unitPrice;
+  if (q == null && u == null) { if (e.amount > 0) { q = 1; u = e.amount; } }
+  else if (q == null && u)    { q = e.amount && u ? Math.round(e.amount / u * 100) / 100 : 1; }
+  else if (u == null && q)    { u = q ? Math.round(e.amount / q * 100) / 100 : e.amount; }
+  return [q || '', u || ''];
+}
+
 function confirmPrintReport() {
   const dlg = document.getElementById('printOptionsDialog');
   if (!dlg) return;
@@ -4299,8 +4310,7 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
       tbodyHtml += `<tr><td colspan="99" style="background:#e8e8e8;font-weight:700;padding:10px 12px;font-size:13px;border-top:2px solid #bbb">${key}</td></tr>`;
       g.forEach(e=>{
         const vat=e.vatAmount||0;
-        const qty=e.qty||'';
-        const unitPrice=e.unitPrice||'';
+        const [qty, unitPrice] = resolveQtyUnit(e);
         tbodyHtml += `<tr>
           <td>${fd(e.date)}</td><td>${e.service}</td>
           <td style="color:#555">${e.notes||'—'}</td>
@@ -4343,8 +4353,7 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
     const rows = entries.map(e=>{
       const vat=e.vatAmount||0;
       const cl=isAll?clientById(e.clientId):null;
-      const qty=e.qty||'';
-      const unitPrice=e.unitPrice||'';
+      const [qty, unitPrice] = resolveQtyUnit(e);
       return `<tr>
         <td>${fd(e.date)}</td>
         ${isAll?`<td>${cl?.name||'?'}</td>`:''}
