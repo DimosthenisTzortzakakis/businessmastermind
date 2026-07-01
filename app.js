@@ -169,9 +169,12 @@ let reportSubMode   = 'separated'; // 'combined' | 'separated'
 // Print options dialog
 let _printSubMode    = 'separated';
 let _printPayFilter  = 'all';
-let _printStatusFilter = 'all'; // 'all' | 'Paid' | 'Pending' — print both / only paid / only pending
+let _printStatusFilter = 'all'; // 'all' | 'Paid' | 'Pending'
 let _printMonths     = null;  // null = all months, array = specific months
 let _printSubClients = null;  // null = all subclients, array = specific ones
+let _printPeriodMode = 'months'; // 'months' | 'range'
+let _printDateFrom   = '';    // YYYY-MM-DD
+let _printDateTo     = '';    // YYYY-MM-DD
 
 // Quick entry tab
 let qeTab = 'income';
@@ -4105,31 +4108,47 @@ function showPrintOptionsDialog(clientId, month) {
   _printSubMode    = 'separated';
   _printPayFilter  = reportPayFilter || 'all';
   _printStatusFilter = 'all';
-  _printMonths     = month ? [month] : null; // pre-select current month if one was chosen
-  _printSubClients = null; // all subclients by default
+  _printMonths     = month ? [month] : null;
+  _printSubClients = null;
+  _printPeriodMode = 'months';
+  _printDateFrom   = '';
+  _printDateTo     = '';
 
-  // ── Month checkboxes ──────────────────────────────────────────
-  let monthsHtml = '';
+  // ── Month checkboxes (inner content only, wrapped in Period section below) ───
+  let monthsInnerHtml = '';
   if (availMonths.length > 1) {
     const allChecked = !_printMonths;
-    monthsHtml = `
-      <div style="margin-bottom:16px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Months</div>
-        <div style="display:flex;flex-direction:column;gap:5px;max-height:150px;overflow-y:auto;padding-right:4px">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-            <input type="checkbox" id="printMonthAll" ${allChecked?'checked':''} onchange="togglePrintAllMonths(this)" style="accent-color:var(--accent);width:14px;height:14px" />
-            <span style="font-weight:600">All Months</span>
-          </label>
-          ${availMonths.map(m=>`
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;padding-left:4px">
-            <input type="checkbox" class="print-month-cb" value="${m}"
-              ${!_printMonths || _printMonths.includes(m)?'checked':''}
-              onchange="updatePrintMonthSel()"
-              style="accent-color:var(--accent);width:14px;height:14px" />
-            <span>${monthLabel(m)}</span>
-          </label>`).join('')}
-        </div>
+    monthsInnerHtml = `
+      <div style="display:flex;flex-direction:column;gap:5px;max-height:140px;overflow-y:auto;padding-right:4px;margin-top:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="printMonthAll" ${allChecked?'checked':''} onchange="togglePrintAllMonths(this)" style="accent-color:var(--accent);width:14px;height:14px" />
+          <span style="font-weight:600">All Months</span>
+        </label>
+        ${availMonths.map(m=>`
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;padding-left:4px">
+          <input type="checkbox" class="print-month-cb" value="${m}"
+            ${!_printMonths || _printMonths.includes(m)?'checked':''}
+            onchange="updatePrintMonthSel()"
+            style="accent-color:var(--accent);width:14px;height:14px" />
+          <span>${monthLabel(m)}</span>
+        </label>`).join('')}
       </div>`;
+  } else if (availMonths.length === 1) {
+    monthsInnerHtml = `<div style="font-size:13px;color:var(--text-muted);margin-top:8px">${monthLabel(availMonths[0])}</div>`;
+  }
+
+  // ── Default date range ────────────────────────────────────────
+  let defFrom = '', defTo = '';
+  if (clientEntries.length) {
+    const dates = clientEntries.map(e=>e.date).sort();
+    defFrom = dates[0];
+    defTo = dates[dates.length-1];
+  }
+  if (month) {
+    const [yr, mo] = month.split('-').map(Number);
+    defFrom = `${month}-01`;
+    const lastDay = new Date(yr, mo, 0).getDate();
+    defTo = `${month}-${String(lastDay).padStart(2,'0')}`;
   }
 
   // ── Subclient checkboxes ──────────────────────────────────────
@@ -4164,7 +4183,28 @@ function showPrintOptionsDialog(clientId, month) {
   dlg.innerHTML = `
     <h3><i class="fa-solid fa-print"></i> Print Options</h3>
     <p style="margin:0 0 16px;font-size:13px;color:var(--text-muted)">${metaText}</p>
-    ${monthsHtml}
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Period</div>
+      <div style="display:flex;gap:8px" id="printPeriodModeToggle">
+        <button class="report-type-tab active" data-pm="months" onclick="setPrintPeriodMode('months')"><i class="fa-solid fa-calendar-days"></i> By Month</button>
+        <button class="report-type-tab" data-pm="range" onclick="setPrintPeriodMode('range')"><i class="fa-solid fa-calendar-week"></i> Custom Range</button>
+      </div>
+      <div id="printMonthsSection">${monthsInnerHtml}</div>
+      <div id="printDateRangeSection" style="display:none;margin-top:10px">
+        <div style="display:flex;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">From</div>
+            <input type="date" id="printDateFrom" value="${defFrom}" onchange="_printDateFrom=this.value"
+              style="width:100%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+          </div>
+          <div style="flex:1">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">To</div>
+            <input type="date" id="printDateTo" value="${defTo}" onchange="_printDateTo=this.value"
+              style="width:100%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+          </div>
+        </div>
+      </div>
+    </div>
     ${subsHtml}
     <div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Sub-client Layout</div>
@@ -4240,6 +4280,21 @@ function setPrintStatusFilter(sf) {
   document.querySelectorAll('#printStatusFilterToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.sf===sf));
 }
 
+function setPrintPeriodMode(mode) {
+  _printPeriodMode = mode;
+  document.querySelectorAll('#printPeriodModeToggle .report-type-tab').forEach(b=>b.classList.toggle('active',b.dataset.pm===mode));
+  const ms = document.getElementById('printMonthsSection');
+  const rs = document.getElementById('printDateRangeSection');
+  if (ms) ms.style.display = mode==='months' ? '' : 'none';
+  if (rs) rs.style.display = mode==='range'  ? '' : 'none';
+  if (mode==='range') {
+    const f = document.getElementById('printDateFrom');
+    const t = document.getElementById('printDateTo');
+    if (f) _printDateFrom = f.value;
+    if (t) _printDateTo   = t.value;
+  }
+}
+
 function closePrintOptionsDialog() {
   const dlg = document.getElementById('printOptionsDialog');
   if (dlg) dlg.classList.remove('open');
@@ -4260,21 +4315,40 @@ function resolveQtyUnit(e) {
 function confirmPrintReport() {
   const dlg = document.getElementById('printOptionsDialog');
   if (!dlg) return;
-  if (_printMonths !== null && _printMonths.length === 0) { showToast('Select at least one month', 'error'); return; }
+  if (_printPeriodMode === 'range') {
+    const f = document.getElementById('printDateFrom');
+    const t = document.getElementById('printDateTo');
+    _printDateFrom = f ? f.value : _printDateFrom;
+    _printDateTo   = t ? t.value : _printDateTo;
+    if (!_printDateFrom || !_printDateTo) { showToast('Select a date range', 'error'); return; }
+    if (_printDateFrom > _printDateTo) { showToast('From date must be before To date', 'error'); return; }
+  } else {
+    if (_printMonths !== null && _printMonths.length === 0) { showToast('Select at least one month', 'error'); return; }
+  }
   if (_printSubClients !== null && _printSubClients.length === 0) { showToast('Select at least one sub-client', 'error'); return; }
   const clientId = dlg.dataset.clientId;
+  const useRange = _printPeriodMode === 'range';
   closePrintOptionsDialog();
-  executePrintReport(clientId, _printMonths, _printSubMode, _printPayFilter, _printSubClients, _printStatusFilter);
+  executePrintReport(clientId,
+    useRange ? null : _printMonths,
+    _printSubMode, _printPayFilter, _printSubClients, _printStatusFilter,
+    useRange ? _printDateFrom : null,
+    useRange ? _printDateTo   : null);
 }
 
-function executePrintReport(clientId, months, subMode, payFilter, subClients, statusFilter) {
+function executePrintReport(clientId, months, subMode, payFilter, subClients, statusFilter, dateFrom, dateTo) {
   let entries = clientId==='__all__' ? [...state.income] : state.income.filter(e=>e.clientId===clientId);
-  // months: null = all, array = specific months
-  if (months && months.length) entries = entries.filter(e => months.includes(monthKey(e.date)));
+  // Date range takes priority over month list
+  if (dateFrom || dateTo) {
+    if (dateFrom) entries = entries.filter(e => e.date >= dateFrom);
+    if (dateTo)   entries = entries.filter(e => e.date <= dateTo);
+  } else if (months && months.length) {
+    entries = entries.filter(e => months.includes(monthKey(e.date)));
+  }
   // subClients: null = all, array = specific subclients (only for single client)
   if (subClients && clientId !== '__all__') entries = entries.filter(e => subClients.includes(e.subClient || ''));
   if (payFilter!=='all') entries = entries.filter(e=>e.paymentType===payFilter);
-  if (statusFilter && statusFilter!=='all') entries = entries.filter(e=>e.status===statusFilter); // Paid-only / Pending-only
+  if (statusFilter && statusFilter!=='all') entries = entries.filter(e=>e.status===statusFilter);
   if (!entries.length) { showToast('No entries to print','error'); return; }
   entries.sort((a,b)=>a.date.localeCompare(b.date));
 
@@ -4283,12 +4357,13 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
   const title = isAll ? 'All Income' : (client?.name||'Report');
   const statusLabel = statusFilter==='Paid' ? ' — Paid only' : statusFilter==='Pending' ? ' — Pending only' : '';
   const filterLabel = (payFilter==='cash' ? ' — Cash Only' : payFilter==='invoice' ? ' — Invoice / VAT' : '') + statusLabel;
-  // Build a readable month string for the PDF header
-  const monthStr = !months ? '' :
+  // Build a readable period string for the PDF header
+  const fd = d => { const [y,mo,dy]=d.split('-'); return `${dy}/${mo}/${y}`; };
+  const monthStr = (dateFrom && dateTo) ? ` · ${fd(dateFrom)} – ${fd(dateTo)}` :
+    !months ? '' :
     months.length === 1 ? ' · '+monthLabel(months[0]) :
     ' · '+monthLabel(months[months.length-1])+' – '+monthLabel(months[0]);
   const showVAT = payFilter!=='cash';
-  const fd = d => { const [y,mo,dy]=d.split('-'); return `${dy}/${mo}/${y}`; };
   const ef = n => '€'+(Math.round(n*100)/100).toFixed(2);
 
   let bodyHtml = '';
