@@ -175,6 +175,7 @@ let _printSubClients = null;  // null = all subclients, array = specific ones
 let _printPeriodMode = 'months'; // 'months' | 'range'
 let _printDateFrom   = '';    // YYYY-MM-DD
 let _printDateTo     = '';    // YYYY-MM-DD
+let _printIncludeVAT = true;  // show/hide VAT column in report
 
 // Quick entry tab
 let qeTab = 'income';
@@ -4113,6 +4114,7 @@ function showPrintOptionsDialog(clientId, month) {
   _printPeriodMode = 'months';
   _printDateFrom   = '';
   _printDateTo     = '';
+  _printIncludeVAT = (reportPayFilter || 'all') !== 'cash'; // cash entries have no VAT by default
 
   // ── Month checkboxes (inner content only, wrapped in Period section below) ───
   let monthsInnerHtml = '';
@@ -4221,12 +4223,19 @@ function showPrintOptionsDialog(clientId, month) {
         <button class="report-type-tab ${_printStatusFilter==='Pending'?'active':''}" data-sf="Pending" onclick="setPrintStatusFilter('Pending')"><i class="fa-solid fa-clock"></i> Pending</button>
       </div>
     </div>
-    <div style="margin-bottom:20px">
+    <div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">Payment Filter</div>
       <div style="display:flex;gap:8px" id="printPayFilterToggle">
         <button class="report-type-tab ${_printPayFilter==='all'?'active':''}" data-pf="all" onclick="setPrintPayFilter('all')">All</button>
         <button class="report-type-tab invoice-tab ${_printPayFilter==='invoice'?'active':''}" data-pf="invoice" onclick="setPrintPayFilter('invoice')"><i class="fa-solid fa-file-invoice"></i> Invoice</button>
         <button class="report-type-tab cash-tab ${_printPayFilter==='cash'?'active':''}" data-pf="cash" onclick="setPrintPayFilter('cash')"><i class="fa-solid fa-money-bill"></i> Cash</button>
+      </div>
+    </div>
+    <div style="margin-bottom:20px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">VAT</div>
+      <div style="display:flex;gap:8px" id="printVATToggle">
+        <button class="report-type-tab ${_printIncludeVAT?'active':''}" data-vat="1" onclick="setPrintIncludeVAT(true)"><i class="fa-solid fa-receipt"></i> With VAT</button>
+        <button class="report-type-tab ${!_printIncludeVAT?'active':''}" data-vat="0" onclick="setPrintIncludeVAT(false)"><i class="fa-solid fa-ban"></i> Without VAT</button>
       </div>
     </div>
     <div class="copy-dialog-btns">
@@ -4295,6 +4304,11 @@ function setPrintPeriodMode(mode) {
   }
 }
 
+function setPrintIncludeVAT(v) {
+  _printIncludeVAT = v;
+  document.querySelectorAll('#printVATToggle .report-type-tab').forEach(b=>b.classList.toggle('active', b.dataset.vat===(v?'1':'0')));
+}
+
 function closePrintOptionsDialog() {
   const dlg = document.getElementById('printOptionsDialog');
   if (dlg) dlg.classList.remove('open');
@@ -4333,10 +4347,11 @@ function confirmPrintReport() {
     useRange ? null : _printMonths,
     _printSubMode, _printPayFilter, _printSubClients, _printStatusFilter,
     useRange ? _printDateFrom : null,
-    useRange ? _printDateTo   : null);
+    useRange ? _printDateTo   : null,
+    _printIncludeVAT);
 }
 
-function executePrintReport(clientId, months, subMode, payFilter, subClients, statusFilter, dateFrom, dateTo) {
+function executePrintReport(clientId, months, subMode, payFilter, subClients, statusFilter, dateFrom, dateTo, includeVAT) {
   let entries = clientId==='__all__' ? [...state.income] : state.income.filter(e=>e.clientId===clientId);
   // Date range takes priority over month list
   if (dateFrom || dateTo) {
@@ -4363,7 +4378,7 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
     !months ? '' :
     months.length === 1 ? ' · '+monthLabel(months[0]) :
     ' · '+monthLabel(months[months.length-1])+' – '+monthLabel(months[0]);
-  const showVAT = payFilter!=='cash';
+  const showVAT = includeVAT !== false; // explicit toggle; legacy callers without param default to show
   const ef = n => '€'+(Math.round(n*100)/100).toFixed(2);
 
   let bodyHtml = '';
@@ -4480,7 +4495,8 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
     </svg>`;
   })();
   const exportedDate = new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});
-  const reportMonth = !months ? 'All Months' :
+  const reportMonth = (dateFrom && dateTo) ? `${fd(dateFrom)} – ${fd(dateTo)}` :
+    !months ? 'All Months' :
     months.length === 1 ? monthLabel(months[0]) :
     months.map(m=>monthLabel(m)).join(', ');
   const subClientLabel = subClients ? ' · '+subClients.join(', ') : '';
