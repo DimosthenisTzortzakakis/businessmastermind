@@ -4406,36 +4406,36 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
           <td style="color:#555">${e.notes||'—'}</td>
           <td style="text-align:center;color:#444">${qty||'—'}</td>
           <td style="text-align:right;color:#444">${unitPrice?ef(unitPrice):'—'}</td>
-          <td style="text-align:right">${ef(e.amount)}</td>
+          <td style="text-align:right${showVAT?'':';font-weight:700'}">${ef(e.amount)}</td>
           ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
-          <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
+          ${showVAT?`<td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>`:''}
         </tr>`;
       });
       tbodyHtml += `<tr style="background:#f5f5f5">
         <td colspan="5" style="font-weight:700;font-size:12px">TOTAL</td>
         <td style="text-align:right;font-weight:700">${ef(tAmt)}</td>
         ${showVAT?`<td style="text-align:right;font-weight:700">${ef(tVAT)}</td>`:''}
-        <td style="text-align:right;font-weight:700">${ef(tAmt+tVAT)}</td>
+        ${showVAT?`<td style="text-align:right;font-weight:700">${ef(tAmt+tVAT)}</td>`:''}
       </tr>`;
     });
     const gAmt=entries.reduce((s,e)=>s+e.amount,0);
     const gVAT=entries.reduce((s,e)=>s+(e.vatAmount||0),0);
-    // Single tbody, no thead/tfoot — only way to guarantee GRAND TOTAL stays at end in PDF
+    const hS = 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px';
     const colHdr = `<tr style="background:#f0f0f0;border-bottom:2px solid #ccc">
-      <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px">Date</td>
-      <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px">Service</td>
-      <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px">Notes</td>
-      <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:center">Qty</td>
-      <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:right">Unit €</td>
-      <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:right">Amount</td>
-      ${showVAT?'<td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:right">VAT</td>':''}
-      <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:10px 12px;text-align:right">Total</td>
+      <td style="${hS}">Date</td>
+      <td style="${hS}">Service</td>
+      <td style="${hS}">Notes</td>
+      <td style="${hS};text-align:center">Qty</td>
+      <td style="${hS};text-align:right">Unit €</td>
+      <td style="${hS};text-align:right">Amount</td>
+      ${showVAT?`<td style="${hS};text-align:right">VAT</td>`:''}
+      ${showVAT?`<td style="${hS};text-align:right">Total</td>`:''}
     </tr>`;
     const grandTotalRow = `<tr style="background:#e8e8e8;border-top:3px solid #bbb">
       <td colspan="5" style="font-weight:800;font-size:13px;padding:12px">GRAND TOTAL</td>
-      <td style="text-align:right;font-weight:800;padding:12px">${ef(gAmt)}</td>
+      <td style="text-align:right;font-weight:800;font-size:${showVAT?'13':'15'}px;padding:12px">${ef(gAmt)}</td>
       ${showVAT?`<td style="text-align:right;font-weight:800;padding:12px">${ef(gVAT)}</td>`:''}
-      <td style="text-align:right;font-weight:800;font-size:15px;padding:12px">${ef(gAmt+gVAT)}</td>
+      ${showVAT?`<td style="text-align:right;font-weight:800;font-size:15px;padding:12px">${ef(gAmt+gVAT)}</td>`:''}
     </tr>`;
     bodyHtml = `<table><tbody>${colHdr}${tbodyHtml}${grandTotalRow}</tbody></table>`;
   } else {
@@ -4452,9 +4452,9 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
         <td style="color:#555">${e.notes||'—'}</td>
         <td style="text-align:center;color:#444">${qty||'—'}</td>
         <td style="text-align:right;color:#444">${unitPrice?ef(unitPrice):'—'}</td>
-        <td style="text-align:right">${ef(e.amount)}</td>
+        <td style="text-align:right${showVAT?'':';font-weight:700'}">${ef(e.amount)}</td>
         ${showVAT?`<td style="text-align:right;color:#888">${vat>0?ef(vat):'—'}</td>`:''}
-        <td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>
+        ${showVAT?`<td style="text-align:right;font-weight:700">${ef(e.amount+vat)}</td>`:''}
       </tr>`;
     }).join('');
     const gAmt=entries.reduce((s,e)=>s+e.amount,0);
@@ -4471,13 +4471,13 @@ function executePrintReport(clientId, months, subMode, payFilter, subClients, st
       <td style="${hdrStyle};text-align:right">Unit €</td>
       <td style="${hdrStyle};text-align:right">Amount</td>
       ${showVAT?`<td style="${hdrStyle};text-align:right">VAT</td>`:''}
-      <td style="${hdrStyle};text-align:right">Total</td>
+      ${showVAT?`<td style="${hdrStyle};text-align:right">Total</td>`:''}
     </tr>`;
     const grandRow2 = `<tr style="background:#e8e8e8;border-top:3px solid #bbb">
       <td colspan="${hdrSpan}" style="font-weight:800;font-size:13px;padding:12px">GRAND TOTAL</td>
-      <td style="text-align:right;font-weight:800;padding:12px">${ef(gAmt)}</td>
+      <td style="text-align:right;font-weight:800;font-size:${showVAT?'13':'15'}px;padding:12px">${ef(gAmt)}</td>
       ${showVAT?`<td style="text-align:right;font-weight:800;padding:12px">${ef(gVAT)}</td>`:''}
-      <td style="text-align:right;font-weight:800;font-size:15px;padding:12px">${ef(gAmt+gVAT)}</td>
+      ${showVAT?`<td style="text-align:right;font-weight:800;font-size:15px;padding:12px">${ef(gAmt+gVAT)}</td>`:''}
     </tr>`;
     bodyHtml = `<table><tbody>${colHdr2}${rows}${grandRow2}</tbody></table>`;
   }
