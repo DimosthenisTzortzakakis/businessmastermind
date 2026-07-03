@@ -4961,7 +4961,6 @@ const AUTH_EMAIL    = 'bm_auth_email';
 const AUTH_UID      = 'bm_auth_uid';
 const AUTH_EXPIRY   = 'bm_auth_expiry';
 
-let syncBlobId   = localStorage.getItem(BLOB_KEY)      || '';
 const FB_URL_DEFAULT    = 'https://business-mastermind-scrollwise-default-rtdb.europe-west1.firebasedatabase.app/';
 const FB_APIKEY_DEFAULT = 'AIzaSyAhj1jDLB1qZ5_M9vadJRNkujBaPVpH0qM';
 
@@ -4972,6 +4971,11 @@ let authRefresh  = localStorage.getItem(AUTH_REFRESH)   || '';
 let authEmail    = localStorage.getItem(AUTH_EMAIL)     || '';
 let authUid      = localStorage.getItem(AUTH_UID)       || '';
 let authExpiry   = parseInt(localStorage.getItem(AUTH_EXPIRY)||'0', 10);
+// When logged in, sync path is ALWAYS the user's own UID — never allow a foreign
+// sync code stored in BLOB_KEY to override it.
+let syncBlobId = authUid
+  ? (localStorage.setItem(BLOB_KEY, authUid), authUid)
+  : (localStorage.getItem(BLOB_KEY) || '');
 let _autoPushTimer = null;
 let _isSyncing  = false;
 let _loginMode  = 'signin'; // 'signin' | 'signup'
@@ -5013,18 +5017,42 @@ function updateSyncModalStatus(msg) {
 }
 
 function updateSyncModalUI() {
-  const fbSection = document.getElementById('syncFirebaseSection');
+  const fbSection   = document.getElementById('syncFirebaseSection');
   const codeSection = document.getElementById('syncCodeSection');
   if (!fbSection || !codeSection) return;
   if (!fbUrl) {
     fbSection.style.display = 'block';
     codeSection.style.display = 'none';
+    return;
+  }
+  fbSection.style.display = 'none';
+  codeSection.style.display = 'block';
+  if (syncBlobId) {
+    const inp = document.getElementById('cloudCodeInput');
+    if (inp) inp.value = encodeSyncCode(fbUrl, syncBlobId);
+  }
+  // When logged in: hide the Connect button — data is already isolated to this
+  // account; entering a foreign sync code would expose another user's data.
+  const connectBtn = codeSection.querySelector('.btn-save-code');
+  const orRow      = codeSection.querySelector('.sync-or-row');
+  const createBtn  = document.getElementById('cloudCreateBtn');
+  const createHint = codeSection.querySelector('.sync-create-hint');
+  const codeInp    = document.getElementById('cloudCodeInput');
+  const codeLabel  = codeSection.querySelector('.sync-section-label');
+  if (authUid) {
+    if (connectBtn) connectBtn.style.display = 'none';
+    if (orRow)      orRow.style.display      = 'none';
+    if (createBtn)  createBtn.style.display  = 'none';
+    if (createHint) createHint.style.display = 'none';
+    if (codeInp)    codeInp.readOnly = true;
+    if (codeLabel)  codeLabel.textContent = 'Your sync code — copy to your other devices (login with the same account there)';
   } else {
-    fbSection.style.display = 'none';
-    codeSection.style.display = 'block';
-    if (syncBlobId) {
-      document.getElementById('cloudCodeInput').value = encodeSyncCode(fbUrl, syncBlobId);
-    }
+    if (connectBtn) connectBtn.style.display = '';
+    if (orRow)      orRow.style.display      = '';
+    if (createBtn)  createBtn.style.display  = '';
+    if (createHint) createHint.style.display = '';
+    if (codeInp)    codeInp.readOnly = false;
+    if (codeLabel)  codeLabel.textContent = 'Sync code';
   }
 }
 
@@ -5379,6 +5407,12 @@ async function cloudCreate() {
 }
 
 async function cloudSaveCode() {
+  // When the user is logged in, their sync path is ALWAYS their own UID.
+  // Entering another user's code here would give them access to foreign data.
+  if (authUid) {
+    showToast('You are logged in — your data is already isolated to your account', 'error');
+    return;
+  }
   const val = (document.getElementById('cloudCodeInput').value || '').trim();
   if (!val) { showToast('Enter a sync code first','error'); return; }
   const decoded = decodeSyncCode(val);
