@@ -420,12 +420,19 @@ function deduplicateExpenses() {
   const toRemove = new Set();
 
   state.expenses.forEach((e, i) => {
-    if (!e.recurring) return; // only deduplicate recurring entries
-    const key = (e.category||'') + '|' + (e.vendor||'') + '|' + monthKey(e.date||'') + '|' + (e.amount||0);
+    // Key on exact date (not just month) + category + vendor + amount.
+    // This catches both recurring duplicates AND non-recurring ones introduced
+    // when two devices were accidentally synced to the same blob and both
+    // pushed the same entries (one recurring:true, one recurring:false).
+    const key = (e.category||'') + '|' + (e.vendor||'') + '|' + (e.date||'') + '|' + (e.amount||0);
     if (seen.has(key)) {
       const prevIdx = seen.get(key);
-      // Keep the one with a newer createdAt
-      if ((e.createdAt||0) >= (state.expenses[prevIdx].createdAt||0)) {
+      const prev = state.expenses[prevIdx];
+      // Prefer: recurring:true over recurring:false (keep the authoritative one),
+      // then newer createdAt as tiebreak.
+      const prevScore = (prev.recurring?1:0)*1e15 + (prev.createdAt||0);
+      const currScore = (e.recurring?1:0)*1e15    + (e.createdAt||0);
+      if (currScore >= prevScore) {
         toRemove.add(prevIdx);
         seen.set(key, i);
       } else {
@@ -437,7 +444,7 @@ function deduplicateExpenses() {
   });
 
   if (toRemove.size > 0) {
-    console.log('Dedup: removed', toRemove.size, 'duplicate recurring expense entries');
+    console.log('Dedup expenses: removed', toRemove.size, 'duplicate entries');
     state.expenses = state.expenses.filter((_, i) => !toRemove.has(i));
     state.lastModified = Date.now();
     idbSet(STORAGE_KEY, state);
@@ -6048,6 +6055,13 @@ async function init() {
     qeGridData = {};
     try { idbSet(QE_GRID_KEY, {}); } catch(_) {}
     try { localStorage.setItem('biz_qe_reset_v4', '1'); } catch(_) {}
+  }
+  // v5: re-run expense dedup with the stricter date-level key that catches
+  // duplicates introduced when two devices were synced to the same blob.
+  if (!localStorage.getItem('biz_exp_dedup_v1')) {
+    deduplicateExpenses();
+    try { localStorage.setItem('biz_exp_dedup_v1', '1'); } catch(_) {}
+    if (syncBlobId) scheduleAutoPush(); // push cleaned state to cloud
   }
   // Always start income/expense tabs on current month (override UIState)
   incMonth  = todayVal().slice(0,7);
