@@ -357,8 +357,7 @@ async function loadData() {
   try { const qg = await idbGet(QE_GRID_KEY); if (qg) qeGridData = qg; } catch(e) {}
   try { const qe = await idbGet(QE_EXP_KEY);  if (qe) qeExpenseGridData = qe; } catch(e) {}
   pruneQEGridData();
-  deduplicateIncome();    // remove any doubled QE entries (same client+date+sub)
-  deduplicateExpenses();  // remove any doubled recurring expense entries (same category+vendor+month)
+  if (deduplicateIncome() | deduplicateExpenses()) scheduleAutoPush();
   loadUIState();
 }
 
@@ -404,12 +403,11 @@ function deduplicateIncome() {
   if (toRemove.size > 0) {
     console.log('Dedup: removed', toRemove.size, 'duplicate income entries');
     state.income = state.income.filter((_, i) => !toRemove.has(i));
-    // Bump timestamp so autoPull sees local as newer than cloud
     state.lastModified = Date.now();
     idbSet(STORAGE_KEY, state);
-    // Push cleaned data to Firebase so deleted entries don't come back
-    scheduleAutoPush();
+    return true; // caller must push to cloud
   }
+  return false;
 }
 
 // Remove duplicate recurring expense entries sharing the same category+vendor+month.
@@ -420,16 +418,15 @@ function deduplicateExpenses() {
   const toRemove = new Set();
 
   state.expenses.forEach((e, i) => {
-    // Key on exact date (not just month) + category + vendor + amount.
-    // This catches both recurring duplicates AND non-recurring ones introduced
+    // Key on exact date + category + vendor + amount.
+    // Catches both recurring duplicates AND non-recurring ones introduced
     // when two devices were accidentally synced to the same blob and both
     // pushed the same entries (one recurring:true, one recurring:false).
     const key = (e.category||'') + '|' + (e.vendor||'') + '|' + (e.date||'') + '|' + (e.amount||0);
     if (seen.has(key)) {
       const prevIdx = seen.get(key);
       const prev = state.expenses[prevIdx];
-      // Prefer: recurring:true over recurring:false (keep the authoritative one),
-      // then newer createdAt as tiebreak.
+      // Prefer recurring:true over recurring:false; newer createdAt as tiebreak.
       const prevScore = (prev.recurring?1:0)*1e15 + (prev.createdAt||0);
       const currScore = (e.recurring?1:0)*1e15    + (e.createdAt||0);
       if (currScore >= prevScore) {
@@ -448,8 +445,9 @@ function deduplicateExpenses() {
     state.expenses = state.expenses.filter((_, i) => !toRemove.has(i));
     state.lastModified = Date.now();
     idbSet(STORAGE_KEY, state);
-    scheduleAutoPush();
+    return true; // caller must push to cloud
   }
+  return false;
 }
 
 function saveUIState() {
@@ -5302,13 +5300,11 @@ async function autoPull(silent) {
     // Use the newer timestamp
     state.lastModified = Math.max(cloudTs, localTs);
     idbSet(STORAGE_KEY, state);
-    // Remove any duplicate recurring entries that crept in via multi-device race
-    deduplicateIncome();
-    deduplicateExpenses();
-    // Push the merged result back if we have local-only entries OR the local state is
-    // newer than the cloud (a local edit that never reached the cloud — e.g. a push
-    // that failed earlier and was stranded — would otherwise sit locally forever).
-    if (localOnlyIncome.length || localOnlyExpense.length || localTs > cloudTs) {
+    // Remove any duplicate entries that crept in via multi-device race.
+    // If dedup removed anything, ALWAYS push — otherwise duplicates re-appear on
+    // the next pull because the cloud copy still has them.
+    const dedupChanged = deduplicateIncome() | deduplicateExpenses();
+    if (dedupChanged || localOnlyIncome.length || localOnlyExpense.length || localTs > cloudTs) {
       scheduleAutoPush();
     }
     // Only re-render if entry IDs or statuses actually changed
@@ -5374,8 +5370,7 @@ async function cloudPull() {
     normalizeSubclients(); migrateMonthlyStopped();
     state.lastModified = p.lastModified || Date.now();
     idbSet(STORAGE_KEY, state);
-    deduplicateIncome();
-    deduplicateExpenses();
+    if (deduplicateIncome() | deduplicateExpenses()) scheduleAutoPush();
     navigate(currentView);
     afterSyncProfile();
     showToast('✓ Pulled from cloud');
@@ -5505,11 +5500,9 @@ async function autoPullForced() {
     const _fLocalNewer = (state.lastModified||0) > (p.lastModified||0); // local has unpushed changes
     state.lastModified = Math.max(p.lastModified || 0, state.lastModified || 0);
     idbSet(STORAGE_KEY, state);
-    // Remove any duplicate recurring entries from multi-device race
-    deduplicateIncome();
-    deduplicateExpenses();
-    // Push merged result back if we had local-only entries OR local is newer than cloud
-    if (localOnlyIncome.length || localOnlyExpense.length || _fLocalNewer) scheduleAutoPush();
+    // Remove duplicates; if any found, ALWAYS push so cloud gets the clean state too
+    const _dedupChanged = deduplicateIncome() | deduplicateExpenses();
+    if (_dedupChanged || localOnlyIncome.length || localOnlyExpense.length || _fLocalNewer) scheduleAutoPush();
     navigate(currentView);
     afterSyncProfile();
     setSyncIndicator('ok');
@@ -6056,12 +6049,10 @@ async function init() {
     try { idbSet(QE_GRID_KEY, {}); } catch(_) {}
     try { localStorage.setItem('biz_qe_reset_v4', '1'); } catch(_) {}
   }
-  // v5: re-run expense dedup with the stricter date-level key that catches
-  // duplicates introduced when two devices were synced to the same blob.
-  if (!localStorage.getItem('biz_exp_dedup_v1')) {
-    deduplicateExpenses();
-    try { localStorage.setItem('biz_exp_dedup_v1', '1'); } catch(_) {}
-    if (syncBlobId) scheduleAutoPush(); // push cleaned state to cloud
+  // v2: dedup with fixed return-value + always push to cloud when duplicates removed.
+  if (!localStorage.getItem('biz_exp_dedup_v2')) {
+    if (deduplicateExpenses() && syncBlobId) scheduleAutoPush();
+    try { localStorage.setItem('biz_exp_dedup_v2', '1'); } catch(_) {}
   }
   // Always start income/expense tabs on current month (override UIState)
   incMonth  = todayVal().slice(0,7);
