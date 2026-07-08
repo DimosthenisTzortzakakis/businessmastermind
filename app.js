@@ -5179,6 +5179,9 @@ async function autoPush(silent, keepalive = false) {
         const gres = await fbFetch(syncBlobId);
         if (gres.ok) { const cloud = await gres.json(); applyCloudBeforePush(cloud); }
       } catch(_) { /* GET failed — fall through to a plain push */ }
+      // Dedup AFTER merging cloud data — cloud may have doubled entries.
+      // Without this, autoPush re-introduces doubles from cloud right before the PUT.
+      deduplicateIncome(); deduplicateExpenses();
       const afterSig = (state.income||[]).length + '/' + (state.expenses||[]).length;
       _mergeChanged = beforeSig !== afterSig;
     }
