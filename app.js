@@ -1708,6 +1708,9 @@ function saveIncome() {
         // Remove both entries that belong to this split group
         const grpId = oldEntry.splitGroupId;
         if (grpId) {
+          // Tombstone before removing — cloud still has these old IDs and would
+          // re-inject them via applyCloudBeforePush without tombstones
+          state.income.filter(e => e.splitGroupId === grpId).forEach(e => addTombstone(e.id));
           state.income = state.income.filter(e => e.splitGroupId !== grpId);
         } else {
           // Fallback: remove by id + companion (same client+date+sub, different paymentType)
@@ -1718,6 +1721,8 @@ function saveIncome() {
             (x.subClient||'') === (oldEntry.subClient||'') &&
             x.paymentType !== oldEntry.paymentType
           )?.id;
+          addTombstone(editingEntryId);
+          if (companionId) addTombstone(companionId);
           state.income = state.income.filter(e => e.id !== editingEntryId && e.id !== companionId);
         }
         clearQEDraftForCell(oldEntry.clientId, oldEntry.date);
