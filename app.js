@@ -151,7 +151,7 @@ let incMonth='all', incClient='all', incStatus='all', incPayType='all';
 let incViewMode = 'byclient'; // 'byclient' | 'detailed' | 'excel'
 
 // Expense filters
-let expMonth='all', expCategory='all';
+let expMonth='all', expCategory='all', expPayMethod='all';
 let expViewMode = 'bycategory'; // 'bycategory' | 'detailed' | 'excel'
 
 // Split payment
@@ -455,7 +455,7 @@ function saveUIState() {
     localStorage.setItem(UI_STATE_KEY, JSON.stringify({
       currentView, dashMonth,
       incMonth, incClient, incStatus, incPayType, incViewMode,
-      expMonth, expCategory, expViewMode,
+      expMonth, expCategory, expPayMethod, expViewMode,
       qeTab, qeGridMonth, qeGridService, qeGridStatus, qeGridPayType,
       qeGridSelectedClients, qeExpPayMethod, reportPayFilter, reportSubMode, qeClientServices
     }));
@@ -476,6 +476,7 @@ function loadUIState() {
     if (s.incViewMode)           incViewMode           = s.incViewMode;
     if (s.expMonth)              expMonth              = s.expMonth;
     if (s.expCategory)           expCategory           = s.expCategory;
+    if (s.expPayMethod)          expPayMethod          = s.expPayMethod;
     if (s.expViewMode)           expViewMode           = s.expViewMode;
     // 'cards' and 'detailed' views were removed — migrate any saved preference
     if (incViewMode==='cards' || incViewMode==='detailed') incViewMode = 'byclient';
@@ -3694,10 +3695,15 @@ function renderExpenses() {
         <select class="filter-select" onchange="setExpFilter('category',this.value)">
           <option value="all" ${expCategory==='all'?'selected':''}>All Categories</option>${catOpts}</select></div>
     </div>
+    <div class="filter-row">
+      <div class="filter-pills-label">Payment</div>
+      <div class="filter-pills">${[['all','All'],['Cash','Cash'],['Credit Card','Card']].map(([v,l])=>`<button class="filter-pill ${expPayMethod===v?'active':''}" onclick="setExpFilter('paymethod','${v}')">${l}</button>`).join('')}</div>
+    </div>
   </div>`;
   let entries = [...state.expenses];
-  if (expMonth!=='all')    entries=entries.filter(e=>monthKey(e.date)===expMonth);
-  if (expCategory!=='all') entries=entries.filter(e=>e.category===expCategory);
+  if (expMonth!=='all')     entries=entries.filter(e=>monthKey(e.date)===expMonth);
+  if (expCategory!=='all')  entries=entries.filter(e=>e.category===expCategory);
+  if (expPayMethod!=='all') entries=entries.filter(e=>e.paymentMethod===expPayMethod);
   entries.sort((a,b)=>b.date.localeCompare(a.date));
 
   // Total of the filtered expenses (same layout as Income: right group, red total)
@@ -3804,7 +3810,7 @@ function renderExpenses() {
   cont.innerHTML = html;
 }
 
-function setExpFilter(t,v){ if(t==='month')expMonth=v; if(t==='category')expCategory=v; saveUIState(); renderExpenses(); }
+function setExpFilter(t,v){ if(t==='month')expMonth=v; if(t==='category')expCategory=v; if(t==='paymethod')expPayMethod=v; saveUIState(); renderExpenses(); }
 
 // ── RENDER: Clients ────────────────────────────────────────────
 function renderClients()     { renderClientCards('clientsGrid',    'client'); }
