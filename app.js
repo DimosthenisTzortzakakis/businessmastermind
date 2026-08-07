@@ -3369,15 +3369,28 @@ function renderStatistics(filteredInc) {
 
   // Stats tables
   const topClients = Object.entries(byClient).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const bySvc={};
-  (filteredInc||state.income).filter(e=>e.status==='Paid').forEach(e=>{ bySvc[e.service]=(bySvc[e.service]||0)+e.amount; });
-  const topSvc = Object.entries(bySvc).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const byMo={};
   state.income.filter(e=>e.status==='Paid').forEach(e=>{ const k=monthKey(e.date); if(k) byMo[k]=(byMo[k]||0)+e.amount; });
   const topMo = Object.entries(byMo).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
+  // Payment mix — income
+  const paidInc = (filteredInc||state.income).filter(e=>e.status==='Paid');
+  const incInv  = paidInc.filter(e=>e.paymentType==='invoice').reduce((s,e)=>s+e.amount,0);
+  const incCash = paidInc.filter(e=>e.paymentType==='cash').reduce((s,e)=>s+e.amount,0);
+  const incTotal = incInv + incCash || 1;
+  const invPct  = Math.round((incInv/incTotal)*100);
+  const cashIncPct = 100 - invPct;
+  // Payment mix — expenses
+  const statExp = state.expenses.filter(e=>dashMatch(e.date));
+  const expCard = statExp.filter(e=>e.paymentMethod==='Credit Card').reduce((s,e)=>s+e.amount,0);
+  const expCashAmt = statExp.filter(e=>e.paymentMethod!=='Credit Card').reduce((s,e)=>s+e.amount,0);
+  const expTotal = expCard + expCashAmt || 1;
+  const cardPct = Math.round((expCard/expTotal)*100);
+  const cashExpPct = 100 - cardPct;
+  // Net cash position: cash income - cash expenses
+  const netCash = incCash - expCashAmt;
+
   const maxCl = topClients[0]?.[1]||1;
-  const maxSv = topSvc[0]?.[1]||1;
   const maxMo = topMo[0]?.[1]||1;
   const periodLabel = dashPeriodLabel();
   document.getElementById('statsTablesRow').innerHTML = `
@@ -3390,11 +3403,23 @@ function renderStatistics(filteredInc) {
       }).join(''):'<div class="chart-empty">No data</div>'}
     </div>
     <div class="stats-table-card">
-      <div class="stats-table-title"><i class="fa-solid fa-star"></i> Top Services <span class="stats-period-sub">${periodLabel}</span></div>
-      ${topSvc.length?topSvc.map(([n,v],i)=>{
-        const pct=Math.round((v/maxSv)*100);
-        return`<div class="stats-row"><span class="stats-rank">${i+1}</span><span class="stats-name">${n}</span><div class="stats-bar-wrap"><div class="stats-bar" style="width:${pct}%;background:var(--accent)"></div></div><span class="stats-val">${fmt(v)}</span></div>`;
-      }).join(''):'<div class="chart-empty">No data</div>'}
+      <div class="stats-table-title"><i class="fa-solid fa-arrows-split-up-and-left"></i> Payment Mix <span class="stats-period-sub">${periodLabel}</span></div>
+      <div class="pay-mix-section">
+        <div class="pay-mix-label"><i class="fa-solid fa-arrow-trend-up" style="color:var(--green)"></i> Income</div>
+        <div class="stats-row"><div class="stats-dot" style="background:var(--accent)"></div><span class="stats-name">Invoice</span><div class="stats-bar-wrap"><div class="stats-bar" style="width:${invPct}%;background:var(--accent)"></div></div><span class="stats-val">${fmt(incInv)} <span class="stats-pct">${invPct}%</span></span></div>
+        <div class="stats-row"><div class="stats-dot" style="background:var(--green)"></div><span class="stats-name">Cash</span><div class="stats-bar-wrap"><div class="stats-bar" style="width:${cashIncPct}%;background:var(--green)"></div></div><span class="stats-val">${fmt(incCash)} <span class="stats-pct">${cashIncPct}%</span></span></div>
+      </div>
+      <div class="pay-mix-divider"></div>
+      <div class="pay-mix-section">
+        <div class="pay-mix-label"><i class="fa-solid fa-arrow-trend-down" style="color:var(--red)"></i> Expenses</div>
+        <div class="stats-row"><div class="stats-dot" style="background:#6366f1"></div><span class="stats-name">Card</span><div class="stats-bar-wrap"><div class="stats-bar" style="width:${cardPct}%;background:#6366f1"></div></div><span class="stats-val">${fmt(expCard)} <span class="stats-pct">${cardPct}%</span></span></div>
+        <div class="stats-row"><div class="stats-dot" style="background:var(--red)"></div><span class="stats-name">Cash</span><div class="stats-bar-wrap"><div class="stats-bar" style="width:${cashExpPct}%;background:var(--red)"></div></div><span class="stats-val">${fmt(expCashAmt)} <span class="stats-pct">${cashExpPct}%</span></span></div>
+      </div>
+      <div class="pay-mix-divider"></div>
+      <div class="pay-mix-net">
+        <span class="pay-mix-net-label"><i class="fa-solid fa-wallet"></i> Net Cash</span>
+        <span class="pay-mix-net-val" style="color:${netCash>=0?'var(--green)':'var(--red)'}">${fmt(netCash)}</span>
+      </div>
     </div>
     <div class="stats-table-card">
       <div class="stats-table-title"><i class="fa-solid fa-calendar-star"></i> Best Months <span class="stats-period-sub">All Time</span></div>

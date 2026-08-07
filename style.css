@@ -1710,6 +1710,22 @@ a { text-decoration: none; color: inherit; }
 .stats-bar-wrap { width: 50px; height: 4px; background: var(--border); border-radius: 2px; flex-shrink: 0; }
 .stats-bar { height: 100%; border-radius: 2px; }
 .stats-val { font-size: 11px; font-weight: 700; color: var(--green); flex-shrink: 0; }
+.stats-pct { font-size: 10px; font-weight: 500; color: var(--text-muted); }
+
+/* Payment Mix card */
+.pay-mix-section { margin-bottom: 4px; }
+.pay-mix-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--text-muted); margin-bottom: 2px;
+  display: flex; align-items: center; gap: 5px;
+}
+.pay-mix-divider { height: 1px; background: var(--border); margin: 8px 0; }
+.pay-mix-net {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0 2px;
+}
+.pay-mix-net-label { font-size: 11px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 5px; }
+.pay-mix-net-val   { font-size: 15px; font-weight: 700; }
 
 /* ============================================================
    SEARCH BAR — styled to match topbar buttons
